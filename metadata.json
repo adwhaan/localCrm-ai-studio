@@ -1,0 +1,8 @@
+{
+  "name": "Enterprise CRM Dashboard",
+  "description": "A highly polished, responsive enterprise CRM dashboard for managing client engagements, contacts, and key activities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
