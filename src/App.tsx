@@ -2,8 +2,10 @@ import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { AdminTagGroupsManager } from "./components/AdminTagGroupsManager";
 import { GroupedTagDropdown, GroupedTagsInput } from "./components/GroupedTagInputs";
+import { DateRangePicker } from "./components/DateRangePicker";
 import { ContactsDashboard } from "./components/ContactsDashboard";
 import { EntitiesDashboard } from "./components/EntitiesDashboard";
+import { EntitiesMap } from "./components/EntitiesMap";
 import { InteractionsDashboard } from "./components/InteractionsDashboard";
 import { EngagementsDashboard } from "./components/EngagementsDashboard";
 import {
@@ -52,427 +54,38 @@ import {
   Shield,
   Download,
   CheckSquare,
-  Settings
+  Settings,
+  AlertCircle
 } from "lucide-react";
 
-// Types
-interface CustomTag {
-  id: string;
-  name: string;
-  color: "blue" | "red" | "emerald" | "amber" | "purple" | "indigo";
-  groupName?: string;
-}
+import {
+  CustomTag,
+  Note,
+  Document,
+  Engagement,
+  Interaction,
+  Contact,
+  Entity,
+  Toast,
+  Notification,
+  AuditLog,
+  Session,
+  SystemUser
+} from "./types";
 
-interface Note {
-  id: string;
-  content: string;
-  createdAt: string;
-  author: string;
-  linkedToType: "interaction" | "contact" | "entity" | "document" | "engagement";
-  linkedToId: string;
-  pinned?: number | boolean;
-  Subject: string;
-  visibility?: "Private" | "Team" | "Public";
-}
-
-interface Document {
-  id: string;
-  title: string;
-  fileType: "PDF" | "Spreadsheet" | "Presentation" | "Contract" | "Briefing";
-  fileSize: string;
-  uploadedAt: string;
-  linkedToType: "interaction" | "contact" | "entity" | "engagement";
-  linkedToId: string;
-  tagIds?: string[];
-  author: string;
-  visibility?: "Private" | "Team" | "Public";
-}
-
-interface Engagement {
-  id: string;
-  title: string;
-  client: string; // Associated corporate organization name
-  type: string;
-  startDate: string;
-  endDate: string;
-  status: "Active" | "Pending Draft" | "Closed" | "Under Negotiation";
-  description: string;
-  tagIds?: string[];
-}
-
-interface Interaction {
-  id: string;
-  subject: string;
-  type: string;
-  assignee: string;
-  status: "IN PROGRESS" | "COMPLETED" | "SCHEDULED" | "BLOCKED";
-  client: string; // Entity name
-  date: string;
-  summary: string;
-  tagIds: string[];
-  contactRoles?: Record<string, string>;
-  Note?: string;
-  PrevInteraction?: number | null;
-  followUpDate?: string;
-  followUpNotes?: string;
-  followUpCompleted?: boolean;
-}
-
-interface Contact {
-  id: string;
-  name: string;
-  role: string;
-  company: string; // Entity name
-  email: string;
-  phone: string;
-  tagIds?: string[];
-  FirstName: string;
-  MiddleName?: string;
-  Lastname?: string;
-  LinkedInURL?: string;
-  Ratting?: number;
-}
-
-interface Entity {
-  id: string;
-  name: string;
-  industry: string;
-  tier: "Strategic" | "Enterprise" | "Key Account" | "Growth";
-  location: string;
-  tagIds?: string[];
-  AddressLine_1?: string;
-  AddressLine_2?: string;
-  Postalcode?: string;
-  City?: string;
-  Website?: string;
-  Rating?: number;
-}
-
-interface Toast {
-  id: string;
-  message: string;
-  type: "success" | "info" | "error";
-}
-
-// Initial Mock Seed Data
-const SEED_TAGS: CustomTag[] = [
-  { id: "tag-1", name: "High Priority", color: "red" },
-  { id: "tag-2", name: "Follow Up", color: "amber" },
-  { id: "tag-3", name: "Technical Audit", color: "blue" },
-  { id: "tag-4", name: "Onboarding", color: "emerald" },
-  { id: "tag-5", name: "Monthly QBR", color: "purple" },
-  { id: "checklist-nda", name: "NDA Signed", color: "blue", groupName: "oper_checklist" },
-  { id: "checklist-kyc", name: "KYC Verified", color: "emerald", groupName: "oper_checklist" },
-  { id: "checklist-onboard", name: "Onboarding Sequence", color: "purple", groupName: "oper_checklist" },
-  { id: "checklist-sec", name: "Security Audit Checked", color: "red", groupName: "oper_checklist" },
-  { id: "checklist-proposal", name: "Proposal Tendered", color: "indigo", groupName: "oper_checklist" }
-];
-
-const SEED_NOTES: Note[] = [
-  {
-    id: "note-1",
-    content: "Customer requested prioritising marketing deliverables ahead of technical onboarding.",
-    createdAt: "2026-06-05T14:30:00Z",
-    author: "Sarah K.",
-    linkedToType: "interaction",
-    linkedToId: "int-1",
-    Subject: "Marketing Prioritization"
-  },
-  {
-    id: "note-2",
-    content: "Deploying server-side layers, database sync tests verified successfully.",
-    createdAt: "2026-06-02T10:15:00Z",
-    author: "Michael R.",
-    linkedToType: "interaction",
-    linkedToId: "int-2",
-    Subject: "Server Alignment Tests"
-  },
-  {
-    id: "note-3",
-    content: "Prefers email communications over secondary desk dialer logs.",
-    createdAt: "2026-06-01T09:00:00Z",
-    author: "David J.",
-    linkedToType: "contact",
-    linkedToId: "con-1",
-    Subject: "Communication Channel Preference"
-  }
-];
-
-const SEED_DOCUMENTS: Document[] = [
-  {
-    id: "doc-1",
-    title: "Q4 Marketing Milestones Blueprint",
-    fileType: "PDF",
-    fileSize: "2.4 MB",
-    uploadedAt: "2026-06-03T16:00:00Z",
-    linkedToType: "interaction",
-    linkedToId: "int-1",
-    author: "David Jenkins",
-    visibility: "Public"
-  },
-  {
-    id: "doc-2",
-    title: "Enterprise Architecture Core Schema Draft",
-    fileType: "Presentation",
-    fileSize: "4.8 MB",
-    uploadedAt: "2026-05-28T11:45:00Z",
-    linkedToType: "interaction",
-    linkedToId: "int-2",
-    author: "David Jenkins",
-    visibility: "Public"
-  },
-  {
-    id: "doc-3",
-    title: "Apex Solutions Umbrella NDA Signed File",
-    fileType: "Contract",
-    fileSize: "1.2 MB",
-    uploadedAt: "2026-05-15T10:00:00Z",
-    linkedToType: "entity",
-    linkedToId: "ent-1",
-    author: "David Jenkins",
-    visibility: "Public"
-  }
-];
-
-const SEED_INTERACTIONS: Interaction[] = [
-  {
-    id: "int-1",
-    subject: "Q4 Marketing Alignment",
-    type: "Meeting",
-    assignee: "Sarah K.",
-    status: "IN PROGRESS",
-    client: "Apex Solutions Ltd.",
-    date: "2026-06-10",
-    summary: "Coordinate Q4 marketing plans, align team on upcoming milestones and core deliverables.",
-    tagIds: ["tag-1", "tag-5"]
-  },
-  {
-    id: "int-2",
-    subject: "Enterprise Onboarding Sync",
-    type: "Review Session",
-    assignee: "Michael R.",
-    status: "COMPLETED",
-    client: "Stark Enterprises",
-    date: "2026-06-01",
-    summary: "Successfully reviewed initial corporate server schemas and staging project flow.",
-    tagIds: ["tag-3"]
-  },
-  {
-    id: "int-3",
-    subject: "Apex Corp Introductory Meetup",
-    type: "Meeting",
-    assignee: "David J.",
-    status: "SCHEDULED",
-    client: "Apex Solutions Ltd.",
-    date: "2026-06-15",
-    summary: "Initial meeting with corporate stakeholders regarding project guidelines and expectations.",
-    tagIds: ["tag-4"]
-  },
-  {
-    id: "int-4",
-    subject: "Project Review Steering Committee",
-    type: "Review Session",
-    assignee: "Sarah K.",
-    status: "BLOCKED",
-    client: "Stark Enterprises",
-    date: "2026-06-08",
-    summary: "Review milestones, risk metrics, and project resource assignments across teams.",
-    tagIds: ["tag-1", "tag-2"]
-  }
-];
-
-const SEED_CONTACTS: Contact[] = [
-  {
-    id: "con-1",
-    name: "Julianne Apex",
-    role: "Stakeholder",
-    company: "Apex Solutions Ltd.",
-    email: "julianne.a@apex.io",
-    phone: "+1 (555) 234-5678",
-    FirstName: "Julianne",
-    MiddleName: "",
-    Lastname: "Apex",
-    LinkedInURL: "https://linkedin.com/in/julianne-apex",
-    Ratting: 3
-  },
-  {
-    id: "con-2",
-    name: "Marcus Miller",
-    role: "Lead Developer",
-    company: "Apex Solutions Ltd.",
-    email: "marcus.m@apex.io",
-    phone: "+1 (555) 876-5432",
-    FirstName: "Marcus",
-    MiddleName: "",
-    Lastname: "Miller",
-    LinkedInURL: "https://linkedin.com/in/marcus-miller",
-    Ratting: 4
-  },
-  {
-    id: "con-3",
-    name: "Sarah Jenkins",
-    role: "VP of Partnerships",
-    company: "Stark Enterprises",
-    email: "sarah.j@stark.com",
-    phone: "+1 (555) 432-1098",
-    FirstName: "Sarah",
-    MiddleName: "",
-    Lastname: "Jenkins",
-    LinkedInURL: "https://linkedin.com/in/sarah-jenkins",
-    Ratting: 2
-  },
-  {
-    id: "con-4",
-    name: "Michael Stark",
-    role: "Managing Director",
-    company: "Stark Enterprises",
-    email: "michael.r@stark.com",
-    phone: "+1 (555) 890-1234",
-    FirstName: "Michael",
-    MiddleName: "R.",
-    Lastname: "Stark",
-    LinkedInURL: "https://linkedin.com/in/michael-stark",
-    Ratting: 1
-  }
-];
-
-const SEED_ENTITIES: Entity[] = [
-  {
-    id: "ent-1",
-    name: "Apex Solutions Ltd.",
-    industry: "Financial Technology",
-    tier: "Strategic",
-    location: "London, UK"
-  },
-  {
-    id: "ent-2",
-    name: "Stark Enterprises",
-    industry: "Aerospace & Technology",
-    tier: "Enterprise",
-    location: "New York, USA"
-  },
-  {
-    id: "ent-3",
-    name: "Oscorp Corp",
-    industry: "Robotics & Sciences",
-    tier: "Key Account",
-    location: "Boston, USA"
-  }
-];
-
-const SEED_ENGAGEMENTS: Engagement[] = [
-  {
-    id: "eng-1",
-    title: "FinTech Acceleration SOW",
-    client: "Apex Solutions Ltd.",
-    type: "SOW Contract",
-    startDate: "2026-05-01",
-    endDate: "2026-11-01",
-    status: "Active",
-    description: "Implementation of custom server-side database sync layers and dashboard compliance features."
-  },
-  {
-    id: "eng-2",
-    title: "AeroTech Marketing Campaign",
-    client: "Stark Enterprises",
-    type: "Marketing Campaign",
-    startDate: "2026-06-01",
-    endDate: "2026-08-30",
-    status: "Under Negotiation",
-    description: "Launch promotion campaign for Stark new transport blueprint series."
-  },
-  {
-    id: "eng-3",
-    title: "Robotics Strategy Advisory",
-    client: "Oscorp Corp",
-    type: "Advisory Initiative",
-    startDate: "2026-07-01",
-    endDate: "2026-09-01",
-    status: "Pending Draft",
-    description: "Providing scientific advisor consultation regarding robotics safety protocols and alignment."
-  }
-];
-
-const ASSIGNEES = ["Sarah K.", "Michael R.", "David J.", "Samantha L."];
-
-export function getThemeClasses(themeKey: string) {
-  switch (themeKey) {
-    case "pitch-dark":
-      return {
-        bg: "bg-slate-950 text-slate-100",
-        card: "bg-slate-900 border-slate-800 text-slate-100 shadow-md",
-        cardHover: "hover:border-slate-700",
-        textDefault: "text-slate-200",
-        textMuted: "text-slate-400 font-mono",
-        textTitle: "text-white font-semibold",
-        border: "border-slate-800",
-        header: "bg-slate-900 border-slate-800 text-white",
-        input: "bg-slate-950 border-slate-800 text-white focus:border-indigo-500 placeholder-slate-600",
-        buttonSec: "bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-705 cursor-pointer",
-        badge: "bg-slate-850 border-slate-700 text-slate-300",
-        mutedBg: "bg-slate-950/80 border border-slate-800"
-      };
-    case "amber-sepia":
-      return {
-        bg: "bg-amber-50/40 text-slate-900",
-        card: "bg-[#fcfaf2] border-amber-200/90 text-slate-900 shadow-sm",
-        cardHover: "hover:border-amber-300",
-        textDefault: "text-slate-800",
-        textMuted: "text-amber-800/80 font-mono",
-        textTitle: "text-amber-950 font-bold",
-        border: "border-amber-200",
-        header: "bg-white border-amber-200/80 text-amber-900",
-        input: "bg-[#fbf9f3] border-amber-200 text-slate-900 focus:border-amber-600 placeholder-amber-700/40",
-        buttonSec: "bg-amber-100/50 hover:bg-amber-100 text-amber-900 border border-amber-200 cursor-pointer",
-        badge: "bg-amber-50 border-amber-150 text-amber-800",
-        mutedBg: "bg-amber-50/50 border border-amber-200/50"
-      };
-    case "charcoal":
-      return {
-        bg: "bg-zinc-100 text-zinc-900",
-        card: "bg-zinc-50 border-zinc-200 text-zinc-900 shadow-sm",
-        cardHover: "hover:border-zinc-350",
-        textDefault: "text-zinc-800",
-        textMuted: "text-zinc-500 font-mono",
-        textTitle: "text-zinc-950 font-bold",
-        border: "border-zinc-200",
-        header: "bg-white border-zinc-200 text-zinc-900",
-        input: "bg-zinc-100/60 border-zinc-200 text-zinc-900 focus:border-zinc-500 placeholder-zinc-400",
-        buttonSec: "bg-zinc-200 hover:bg-zinc-300 text-zinc-800 border border-zinc-303 cursor-pointer",
-        badge: "bg-zinc-100 border-zinc-200 text-zinc-700",
-        mutedBg: "bg-zinc-100/40 border border-zinc-200/60"
-      };
-    case "slate":
-    default:
-      return {
-        bg: "bg-slate-50 text-slate-800",
-        card: "bg-white border-slate-200 text-slate-800 shadow-sm",
-        cardHover: "hover:border-slate-350",
-        textDefault: "text-slate-800",
-        textMuted: "text-slate-400 font-mono",
-        textTitle: "text-slate-900 font-semibold",
-        border: "border-slate-200",
-        header: "bg-white border-slate-200 text-slate-800",
-        input: "bg-slate-100 border-transparent text-slate-800 focus:bg-white focus:border-blue-500 placeholder-slate-400",
-        buttonSec: "bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-705 cursor-pointer",
-        badge: "bg-slate-100 border-slate-200 text-slate-700",
-        mutedBg: "bg-slate-50 border border-slate-200"
-      };
-  }
-}
-
-export function getDensityPadding(density: string, type: "card" | "input" | "table-cell" | "list-spacing") {
-  if (type === "card") {
-    return density === "compact" ? "p-3.5" : density === "spacious" ? "p-7" : "p-5";
-  }
-  if (type === "input") {
-    return density === "compact" ? "py-1.5 px-2.5 text-[11px]" : density === "spacious" ? "py-3 pb-3 px-4 text-sm" : "py-2.5 px-3 text-xs";
-  }
-  if (type === "table-cell") {
-    return density === "compact" ? "py-1.5 px-2.5 text-[10px]" : density === "spacious" ? "py-4 px-5 text-sm" : "py-2.5 px-3 text-xs";
-  }
-  return density === "compact" ? "space-y-2" : density === "spacious" ? "space-y-5" : "space-y-4";
-}
+import {
+  SEED_TAGS,
+  SEED_NOTES,
+  SEED_DOCUMENTS,
+  SEED_INTERACTIONS,
+  SEED_CONTACTS,
+  SEED_ENTITIES,
+  SEED_ENGAGEMENTS,
+  ASSIGNEES,
+  getThemeClasses,
+  getDensityPadding
+} from "./data";
+import { apiService } from "./services/CrmApiService";
 
 export default function App() {
   // Session State
@@ -512,13 +125,27 @@ export default function App() {
     };
   });
 
-  const [authScreen, setAuthScreen] = useState<"login" | "signup" | "reset">("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authConfirmPassword, setAuthConfirmPassword] = useState("");
   const [authName, setAuthName] = useState("");
-  const [authRole, setAuthRole] = useState("Senior Analyst");
+  const [authRole, setAuthRole] = useState("Auditor Seat");
   const [showPassword, setShowPassword] = useState(false);
+
+  const clearAuthInputs = () => {
+    setAuthEmail("");
+    setAuthPassword("");
+    setAuthConfirmPassword("");
+    setAuthName("");
+    setAuthRole("Auditor Seat");
+    setShowPassword(false);
+  };
+
+  const [authScreen, _setAuthScreen] = useState<"login" | "signup" | "reset">("login");
+  const setAuthScreen = (screen: "login" | "signup" | "reset") => {
+    _setAuthScreen(screen);
+    clearAuthInputs();
+  };
 
   // Persistence States
   const [tags, setTags] = useState<CustomTag[]>(() => {
@@ -593,7 +220,7 @@ export default function App() {
 
   // Dashboard / List Mode Toggles
   const [contactsViewMode, setContactsViewMode] = useState<"list" | "dashboard">("list");
-  const [entitiesViewMode, setEntitiesViewMode] = useState<"list" | "dashboard">("list");
+  const [entitiesViewMode, setEntitiesViewMode] = useState<"list" | "dashboard" | "map">("list");
   const [interactionsSubView, setInteractionsSubView] = useState<"list" | "dashboard">("list");
   const [engagementsViewMode, setEngagementsViewMode] = useState<"list" | "dashboard">("list");
 
@@ -671,7 +298,7 @@ export default function App() {
   const [operatorForm, setOperatorForm] = useState({
     name: "",
     email: "",
-    role: "Senior Analyst",
+    role: "Auditor Seat",
     passphrase: ""
   });
 
@@ -686,10 +313,45 @@ export default function App() {
   const [interactionStartDateFilter, setInteractionStartDateFilter] = useState<string>("");
   const [interactionEndDateFilter, setInteractionEndDateFilter] = useState<string>("");
   const [interactionsViewMode, setInteractionsViewMode] = useState<"kanban" | "calendar">("kanban");
-  const [calendarYear, setCalendarYear] = useState<number>(2026);
-  const [calendarMonth, setCalendarMonth] = useState<number>(5); // June is 5 (0-indexed)
+  const [calendarYear, setCalendarYear] = useState<number>(() => new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState<number>(() => new Date().getMonth()); // 0-indexed dynamically
   const [timelineFilterMode, setTimelineFilterMode] = useState<"Active" | "All">("Active");
   const [timelineZoom, setTimelineZoom] = useState<"Monthly" | "Quarterly" | "Annual">("Quarterly");
+  const [dragOverDate, setDragOverDate] = useState<string | null>(null);
+
+  // Custom System Confirm Modal State
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setConfirmDialog({ title, message, onConfirm });
+  };
+
+  const highlightText = (text: string, query: string): React.ReactNode => {
+    if (!query || !text) return text;
+    const escapedQuery = String(query).replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+    try {
+      const parts = String(text).split(new RegExp(`(${escapedQuery})`, "gi"));
+      return (
+        <>
+          {parts.map((part, index) =>
+            part.toLowerCase() === query.toLowerCase() ? (
+              <mark key={index} className="bg-amber-150 text-amber-950 font-semibold px-0.5 rounded">
+                {part}
+              </mark>
+            ) : (
+              part
+            )
+          )}
+        </>
+      );
+    } catch {
+      return text;
+    }
+  };
 
   // Admin Override Panel Filter States
   const [adminVisibilitySearch, setAdminVisibilitySearch] = useState<string>("");
@@ -1197,181 +859,101 @@ export default function App() {
     showToast(`Successfully downloaded CSV file with ${filteredAuditLogs.length} audit records.`, "success");
   };
 
+  // Synchronize apiService credentials with the active React session
+  useEffect(() => {
+    apiService.setSession(session);
+  }, [session]);
+
   const loadAuditLogs = async () => {
-    if (!session || session.role !== "Senior Analyst") return;
-    try {
-      const res = await fetch("/api/audit-logs", {
-        headers: {
-          "X-User-Email": session.email,
-          "X-User-Role": session.role
-        }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setAuditLogs(data);
-      }
-    } catch (e) {
-      console.error("Failed to load audit logs:", e);
+    const logs = await apiService.loadAuditLogs();
+    if (logs) {
+      setAuditLogs(logs);
     }
   };
 
   const purgeAuditLogs = async () => {
-    if (!session || session.role !== "Senior Analyst") return;
-    if (!window.confirm("CRITICAL WARNING: Are you absolutely sure you want to permanently purge all system audit logs? This is irreversible and will lose full lineage visibility.")) {
-      return;
-    }
-    try {
-      const res = await fetch("/api/audit-logs/purge", {
-        method: "POST",
-        headers: {
-          "X-User-Email": session.email,
-          "X-User-Role": session.role
+    showConfirm(
+      "Purge Audit Ledger",
+      "CRITICAL WARNING: Are you absolutely sure you want to permanently purge all system audit logs? This is irreversible and will lose full lineage visibility.",
+      async () => {
+        const success = await apiService.purgeAuditLogs();
+        if (success) {
+          showToast("Audit ledger purged successfully.", "info");
+          loadAuditLogs();
         }
-      });
-      if (res.ok) {
-        showToast("Audit ledger purged successfully.", "info");
-        loadAuditLogs();
       }
-    } catch (e) {
-      console.error("Failed to purge audit logs:", e);
-    }
+    );
   };
 
   // Hashing Function with Unique Email-Seeded Salt
   const hashPassword = async (pwd: string, email: string): Promise<string> => {
-    let hash = 0;
-    const userSeed = email.toLowerCase().trim();
-    const salt = `_crm_salt_2026_${userSeed}_`;
-    const salted = pwd + salt;
-    for (let i = 0; i < salted.length; i++) {
-      hash = (hash << 5) - hash + salted.charCodeAt(i);
-      hash = hash & hash;
-    }
-    return Math.abs(hash).toString(16);
+    return apiService.hashPassword(pwd, email);
   };
 
   // SQLite API synchronization helper
   const syncToServer = async (url: string, method: string, body?: any) => {
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (session) {
-        headers["X-User-Email"] = session.email;
-        headers["X-User-Name"] = session.name;
-        headers["X-User-Role"] = session.role;
-      }
-      const res = await fetch(url, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined
-      });
-      if (!res.ok) {
-        console.error("SQLite Sync Error:", await res.text());
-      }
-    } catch (e) {
-      console.error("Failed to sync SQLite backend:", e);
-    }
+    await apiService.syncToServer(url, method, body);
   };
 
   // Pull loadSQLiteState out of useEffect so we can call it on demand (e.g., when WebSocket notification arrives)
   const loadSQLiteState = async () => {
-    try {
-      const res = await fetch("/api/all");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.tags) {
-          setTags(data.tags);
-          localStorage.setItem("crm_tags", JSON.stringify(data.tags));
-        }
-        if (data.notes) {
-          setNotes(data.notes);
-          localStorage.setItem("crm_notes", JSON.stringify(data.notes));
-        }
-        if (data.documents) {
-          setDocuments(data.documents);
-          localStorage.setItem("crm_documents", JSON.stringify(data.documents));
-        }
-        if (data.interactions) {
-          setInteractions(data.interactions);
-          localStorage.setItem("crm_interactions", JSON.stringify(data.interactions));
-        }
-        if (data.contacts) {
-          setContacts(data.contacts);
-          localStorage.setItem("crm_contacts", JSON.stringify(data.contacts));
-        }
-        if (data.entities) {
-          setEntities(data.entities);
-          localStorage.setItem("crm_entities", JSON.stringify(data.entities));
-        }
-        if (data.engagements) {
-          setEngagements(data.engagements);
-          localStorage.setItem("crm_engagements", JSON.stringify(data.engagements));
-        }
-        if (data.systemUsers) {
-          setSystemUsers(data.systemUsers);
-          localStorage.setItem("crm_users", JSON.stringify(data.systemUsers));
-        }
+    const data = await apiService.loadSQLiteState();
+    if (data) {
+      if (data.tags) {
+        setTags(data.tags);
+        localStorage.setItem("crm_tags", JSON.stringify(data.tags));
       }
-    } catch (err) {
-      console.error("Failed to load SQLite data:", err);
+      if (data.notes) {
+        setNotes(data.notes);
+        localStorage.setItem("crm_notes", JSON.stringify(data.notes));
+      }
+      if (data.documents) {
+        setDocuments(data.documents);
+        localStorage.setItem("crm_documents", JSON.stringify(data.documents));
+      }
+      if (data.interactions) {
+        setInteractions(data.interactions);
+        localStorage.setItem("crm_interactions", JSON.stringify(data.interactions));
+      }
+      if (data.contacts) {
+        setContacts(data.contacts);
+        localStorage.setItem("crm_contacts", JSON.stringify(data.contacts));
+      }
+      if (data.entities) {
+        setEntities(data.entities);
+        localStorage.setItem("crm_entities", JSON.stringify(data.entities));
+      }
+      if (data.engagements) {
+        setEngagements(data.engagements);
+        localStorage.setItem("crm_engagements", JSON.stringify(data.engagements));
+      }
+      if (data.systemUsers) {
+        setSystemUsers(data.systemUsers);
+        localStorage.setItem("crm_users", JSON.stringify(data.systemUsers));
+      }
     }
   };
 
   const loadNotifications = async () => {
-    if (!session) return;
-    try {
-      const res = await fetch("/api/notifications", {
-        headers: {
-          "X-User-Email": session.email,
-          "X-User-Role": session.role
-        }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setNotifications(data);
-      }
-    } catch (e) {
-      console.error("Failed to load notifications:", e);
+    const data = await apiService.loadNotifications();
+    if (data) {
+      setNotifications(data);
     }
   };
 
   const markNotificationAsRead = async (id: string) => {
-    if (!session) return;
-    try {
-      const res = await fetch("/api/notifications/read", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-User-Email": session.email,
-          "X-User-Role": session.role
-        },
-        body: JSON.stringify({ notificationIds: [id] })
-      });
-      if (res.ok) {
-        setNotifications((prev) =>
-          prev.map((n) => (n.id === id ? { ...n, isRead: 1 } : n))
-        );
-      }
-    } catch (e) {
-      console.error("Failed to mark notification as read:", e);
+    const success = await apiService.markNotificationAsRead(id);
+    if (success) {
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, isRead: 1 } : n))
+      );
     }
   };
 
   const markAllNotificationsAsRead = async () => {
-    if (!session) return;
-    try {
-      const res = await fetch("/api/notifications/read-all", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-User-Email": session.email,
-          "X-User-Role": session.role
-        }
-      });
-      if (res.ok) {
-        setNotifications((prev) => prev.map((n) => ({ ...n, isRead: 1 })));
-      }
-    } catch (e) {
-      console.error("Failed to mark all notifications as read:", e);
+    const success = await apiService.markAllNotificationsAsRead();
+    if (success) {
+      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: 1 })));
     }
   };
 
@@ -1461,25 +1043,30 @@ export default function App() {
   // --- CLIENT-SIDE BATCH ACTION HANDLERS ---
   const handleBatchInteractionDelete = async () => {
     if (selectedInteractionIds.length === 0) return;
-    if (!window.confirm(`Are you sure you want to delete ${selectedInteractionIds.length} selected interactions?`)) return;
-
-    try {
-      const res = await fetch("/api/interactions/batch-delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: selectedInteractionIds })
-      });
-      if (res.ok) {
-        setInteractions(prev => prev.filter(i => !selectedInteractionIds.includes(i.id)));
-        showToast(`Successfully deleted ${selectedInteractionIds.length} interactions`, "success");
-        setSelectedInteractionIds([]);
-      } else {
-        showToast("Failed to perform batch deletion", "error");
+    showConfirm(
+      "Delete Selected Interactions",
+      `Are you sure you want to delete ${selectedInteractionIds.length} selected interactions? This action is permanent.`,
+      async () => {
+        try {
+          const res = await fetch("/api/interactions/batch-delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: selectedInteractionIds })
+          });
+          if (res.ok) {
+            setInteractions(prev => prev.filter(i => !selectedInteractionIds.includes(i.id)));
+            showToast(`Successfully deleted ${selectedInteractionIds.length} interactions`, "success");
+            setSelectedInteractionIds([]);
+            await loadSQLiteState();
+          } else {
+            showToast("Failed to perform batch deletion", "error");
+          }
+        } catch (err) {
+          console.error(err);
+          showToast("Error executing batch deletion", "error");
+        }
       }
-    } catch (err) {
-      console.error(err);
-      showToast("Error executing batch deletion", "error");
-    }
+    );
   };
 
   const handleBatchInteractionStatusUpdate = async (newStatus: "IN PROGRESS" | "SCHEDULED" | "COMPLETED" | "BLOCKED") => {
@@ -1510,25 +1097,30 @@ export default function App() {
 
   const handleBatchContactDelete = async () => {
     if (selectedContactIds.length === 0) return;
-    if (!window.confirm(`Are you sure you want to delete ${selectedContactIds.length} selected contacts?`)) return;
-
-    try {
-      const res = await fetch("/api/contacts/batch-delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: selectedContactIds })
-      });
-      if (res.ok) {
-        setContacts(prev => prev.filter(c => !selectedContactIds.includes(c.id)));
-        showToast(`Successfully deleted ${selectedContactIds.length} contacts`, "success");
-        setSelectedContactIds([]);
-      } else {
-        showToast("Failed to perform batch deletion", "error");
+    showConfirm(
+      "Delete Selected Contacts",
+      `Are you sure you want to delete ${selectedContactIds.length} selected contacts? This action is permanent.`,
+      async () => {
+        try {
+          const res = await fetch("/api/contacts/batch-delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: selectedContactIds })
+          });
+          if (res.ok) {
+            setContacts(prev => prev.filter(c => !selectedContactIds.includes(c.id)));
+            showToast(`Successfully deleted ${selectedContactIds.length} contacts`, "success");
+            setSelectedContactIds([]);
+            await loadSQLiteState();
+          } else {
+            showToast("Failed to perform batch deletion", "error");
+          }
+        } catch (err) {
+          console.error(err);
+          showToast("Error executing batch deletion", "error");
+        }
       }
-    } catch (err) {
-      console.error(err);
-      showToast("Error executing batch deletion", "error");
-    }
+    );
   };
 
   const handleBatchContactRoleUpdate = async (newRole: string) => {
@@ -1591,8 +1183,25 @@ export default function App() {
       showToast("Please provide both email and passcode.", "error");
       return;
     }
-    const users = JSON.parse(localStorage.getItem("crm_users") || "[]");
-    const user = users.find((u: any) => u.email.toLowerCase() === authEmail.toLowerCase());
+    const cleanEmail = authEmail.trim();
+    
+    // Dynamically retrieve the latest registrations directly from the database to support seamless multi-operator logins
+    let usersList = [];
+    try {
+      const data = await apiService.loadSQLiteState();
+      if (data && data.systemUsers) {
+        usersList = data.systemUsers;
+        setSystemUsers(usersList);
+        localStorage.setItem("crm_users", JSON.stringify(usersList));
+      } else {
+        usersList = JSON.parse(localStorage.getItem("crm_users") || "[]");
+      }
+    } catch (err) {
+      console.warn("Failed retrieving live operator cache, relying on offline registry:", err);
+      usersList = JSON.parse(localStorage.getItem("crm_users") || "[]");
+    }
+
+    const user = usersList.find((u: any) => u.email.toLowerCase() === cleanEmail.toLowerCase());
     if (!user) {
       showToast("Access denined. Unrecognised operator unit.", "error");
       return;
@@ -1601,7 +1210,7 @@ export default function App() {
       showToast("Security Exception: This operator seat has been suspended by system administrator.", "error");
       return;
     }
-    const hashed = await hashPassword(authPassword, authEmail);
+    const hashed = await hashPassword(authPassword, cleanEmail);
     if (user.passwordHash !== hashed) {
       showToast("Invalid credentials hash match failed.", "error");
       return;
@@ -1610,6 +1219,7 @@ export default function App() {
     setSession(sessionData);
     setUserProfileName(user.name);
     localStorage.setItem("crm_active_session", JSON.stringify(sessionData));
+    clearAuthInputs();
     showToast(`Welcome back, Operator ${user.name}! Connected.`, "success");
   };
 
@@ -1623,19 +1233,38 @@ export default function App() {
       showToast("Confirmation coordinates mismatch.", "error");
       return;
     }
-    const users = JSON.parse(localStorage.getItem("crm_users") || "[]");
-    if (users.some((u: any) => u.email.toLowerCase() === authEmail.toLowerCase())) {
+    const cleanEmail = authEmail.trim();
+    const cleanName = authName.trim();
+    
+    // Load fresh data before checking existing emails
+    let usersList = [];
+    try {
+      const data = await apiService.loadSQLiteState();
+      if (data && data.systemUsers) {
+        usersList = data.systemUsers;
+      } else {
+        usersList = JSON.parse(localStorage.getItem("crm_users") || "[]");
+      }
+    } catch (err) {
+      usersList = JSON.parse(localStorage.getItem("crm_users") || "[]");
+    }
+
+    if (usersList.some((u: any) => u.email.toLowerCase() === cleanEmail.toLowerCase())) {
       showToast("This email has already been registered.", "error");
       return;
     }
-    const hashed = await hashPassword(authPassword, authEmail);
-    const newUser = { email: authEmail, passwordHash: hashed, name: authName, role: authRole };
-    const updatedUsers = [...users, newUser];
+    const hashed = await hashPassword(authPassword, cleanEmail);
+    const newUser = { email: cleanEmail, passwordHash: hashed, name: cleanName, role: authRole };
+    const updatedUsers = [...usersList, newUser];
     localStorage.setItem("crm_users", JSON.stringify(updatedUsers));
     setSystemUsers(updatedUsers);
-    setSession({ email: authEmail, name: authName, role: authRole });
-    setUserProfileName(authName);
-    localStorage.setItem("crm_active_session", JSON.stringify({ email: authEmail, name: authName, role: authRole }));
+    await syncToServer("/api/users", "POST", newUser);
+    // Reload state after syncing
+    await loadSQLiteState();
+    setSession({ email: cleanEmail, name: cleanName, role: authRole });
+    setUserProfileName(cleanName);
+    localStorage.setItem("crm_active_session", JSON.stringify({ email: cleanEmail, name: cleanName, role: authRole }));
+    clearAuthInputs();
     showToast(`Operator profiles set up successfully. Connected.`, "success");
   };
 
@@ -1649,15 +1278,34 @@ export default function App() {
       showToast("Credential verification mismatch.", "error");
       return;
     }
-    const users = JSON.parse(localStorage.getItem("crm_users") || "[]");
-    const idx = users.findIndex((u: any) => u.email.toLowerCase() === authEmail.toLowerCase() && u.name.toLowerCase() === authName.toLowerCase());
+    const cleanEmail = authEmail.trim();
+    const cleanName = authName.trim();
+    
+    // Fetch latest user states from DB
+    let usersList = [];
+    try {
+      const data = await apiService.loadSQLiteState();
+      if (data && data.systemUsers) {
+        usersList = data.systemUsers;
+        setSystemUsers(usersList);
+        localStorage.setItem("crm_users", JSON.stringify(usersList));
+      } else {
+        usersList = JSON.parse(localStorage.getItem("crm_users") || "[]");
+      }
+    } catch (err) {
+      usersList = JSON.parse(localStorage.getItem("crm_users") || "[]");
+    }
+
+    const idx = usersList.findIndex((u: any) => u.email.toLowerCase() === cleanEmail.toLowerCase() && u.name.toLowerCase() === cleanName.toLowerCase());
     if (idx === -1) {
       showToast("Operator identifier verification failed.", "error");
       return;
     }
-    users[idx].passwordHash = await hashPassword(authPassword, authEmail);
-    localStorage.setItem("crm_users", JSON.stringify(users));
-    setSystemUsers(users);
+    usersList[idx].passwordHash = await hashPassword(authPassword, cleanEmail);
+    localStorage.setItem("crm_users", JSON.stringify(usersList));
+    setSystemUsers(usersList);
+    await syncToServer("/api/users", "PUT", usersList[idx]);
+    clearAuthInputs();
     showToast("Operator passphrase securely updated. Please login.", "success");
     setAuthScreen("login");
   };
@@ -1665,6 +1313,7 @@ export default function App() {
   const handleLogout = () => {
     setSession(null);
     localStorage.removeItem("crm_active_session");
+    clearAuthInputs();
     showToast("Operator session closed. Local matrix locked.", "info");
   };
 
@@ -1733,8 +1382,8 @@ export default function App() {
         followUpCompleted: false
       });
     } else if (newType === "contact") {
-      if (!contactForm.FirstName || !contactForm.company || !contactForm.email) {
-        showToast("Contact Name, email, and corporate company required.", "error");
+      if (!contactForm.FirstName || !contactForm.company) {
+        showToast("Contact Name and corporate company required.", "error");
         return;
       }
       const fullName = `${contactForm.FirstName} ${contactForm.MiddleName ? contactForm.MiddleName + ' ' : ''}${contactForm.Lastname || ""}`.trim();
@@ -1780,57 +1429,88 @@ export default function App() {
         showToast("operator Name, email, and passphrase required.", "error");
         return;
       }
-      const hashed = await hashPassword(operatorForm.passphrase, operatorForm.email);
-      const newUser = { email: operatorForm.email, passwordHash: hashed, name: operatorForm.name, role: operatorForm.role };
-      setSystemUsers([...systemUsers, newUser]);
-      syncToServer("/api/users", "POST", newUser);
-      showToast(`Operator profile registered: ${operatorForm.name}`, "success");
-      setOperatorForm({ name: "", email: "", role: "Senior Analyst", passphrase: "" });
+      const cleanEmail = operatorForm.email.trim();
+      const cleanName = operatorForm.name.trim();
+
+      // Enforce: only an admin role (Senior Analyst) can register a new admin user
+      if (operatorForm.role === "Senior Analyst" && session?.role !== "Senior Analyst") {
+        showToast("Access Denied: Only a System Administrator (Senior Analyst) can register new administrator seats.", "error");
+        return;
+      }
+
+      // Check if email already exists
+      if (systemUsers.some((u: any) => u.email.toLowerCase() === cleanEmail.toLowerCase())) {
+        showToast("An operator with this email has already been registered.", "error");
+        return;
+      }
+
+      const hashed = await hashPassword(operatorForm.passphrase, cleanEmail);
+      const newUser = { email: cleanEmail, passwordHash: hashed, name: cleanName, role: operatorForm.role, suspended: 0 };
+      const updatedList = [...systemUsers, newUser];
+      setSystemUsers(updatedList);
+      localStorage.setItem("crm_users", JSON.stringify(updatedList));
+      await syncToServer("/api/users", "POST", newUser);
+      await loadSQLiteState();
+      showToast(`Operator profile registered: ${cleanName}`, "success");
+      setOperatorForm({ name: "", email: "", role: session?.role === "Senior Analyst" ? "Senior Analyst" : "Auditor Seat", passphrase: "" });
     }
     setIsNewModalOpen(false);
   };
 
-  const handleUpdateItem = (type: "interaction" | "contact" | "entity" | "engagement" | "user", payload: any) => {
+  const handleUpdateItem = async (type: "interaction" | "contact" | "entity" | "engagement" | "user", payload: any) => {
     if (type === "interaction") {
       setInteractions((prev) => prev.map((item) => (item.id === payload.id ? payload : item)));
-      syncToServer(`/api/interactions/${payload.id}`, "PUT", payload);
+      await syncToServer(`/api/interactions/${payload.id}`, "PUT", payload);
+      await loadSQLiteState();
       showToast("Interaction briefing updated.", "success");
     } else if (type === "contact") {
       setContacts((prev) => prev.map((item) => (item.id === payload.id ? payload : item)));
-      syncToServer(`/api/contacts/${payload.id}`, "PUT", payload);
+      await syncToServer(`/api/contacts/${payload.id}`, "PUT", payload);
+      await loadSQLiteState();
       showToast("Contact coordinates updated.", "success");
     } else if (type === "entity") {
       setEntities((prev) => prev.map((item) => (item.id === payload.id ? payload : item)));
-      syncToServer(`/api/entities/${payload.id}`, "PUT", payload);
+      await syncToServer(`/api/entities/${payload.id}`, "PUT", payload);
+      await loadSQLiteState();
       showToast("Corporate account profiles modified.", "success");
     } else if (type === "engagement") {
       setEngagements((prev) => prev.map((item) => (item.id === payload.id ? payload : item)));
-      syncToServer(`/api/engagements/${payload.id}`, "PUT", payload);
+      await syncToServer(`/api/engagements/${payload.id}`, "PUT", payload);
+      await loadSQLiteState();
       showToast("Engagement details modified.", "success");
     } else if (type === "user") {
-      setSystemUsers((prev) => prev.map((item) => (item.email === payload.email ? payload : item)));
-      syncToServer(`/api/users`, "PUT", payload);
+      setSystemUsers((prev) => {
+        const updated = prev.map((item) => (item.email === payload.email ? payload : item));
+        localStorage.setItem("crm_users", JSON.stringify(updated));
+        return updated;
+      });
+      await syncToServer(`/api/users`, "PUT", payload);
+      await loadSQLiteState();
       showToast("Operator Seat updated successfully.", "success");
     }
     setSelectedItem(null);
   };
 
-  const handleDeleteItem = (type: "interaction" | "contact" | "entity" | "engagement" | "user", id: string) => {
+  const handleDeleteItem = async (type: "interaction" | "contact" | "entity" | "engagement" | "user", id: string) => {
     if (type === "interaction") {
       setInteractions((prev) => prev.filter((item) => item.id !== id));
-      syncToServer(`/api/interactions/${id}`, "DELETE");
+      await syncToServer(`/api/interactions/${id}`, "DELETE");
+      await loadSQLiteState();
       showToast("Interaction registry removed.", "info");
     } else if (type === "contact") {
       setContacts((prev) => prev.filter((item) => item.id !== id));
-      syncToServer(`/api/contacts/${id}`, "DELETE");
+      await syncToServer(`/api/contacts/${id}`, "DELETE");
+      await loadSQLiteState();
       showToast("Stakeholder contact card removed.", "info");
     } else if (type === "entity") {
       setEntities((prev) => prev.filter((item) => item.id !== id));
-      syncToServer(`/api/entities/${id}`, "DELETE");
+      await syncToServer(`/api/entities/${id}`, "DELETE");
+      await loadSQLiteState();
       showToast("Corporate profile structure discarded.", "info");
     } else if (type === "engagement") {
       setEngagements((prev) => prev.filter((item) => item.id !== id));
-      syncToServer(`/api/engagements/${id}`, "DELETE");
+      await syncToServer(`/api/engagements/${id}`, "DELETE");
+      await loadSQLiteState();
       showToast("Engagement Initiative discarded.", "info");
     } else if (type === "user") {
       if (id.toLowerCase() === session?.email.toLowerCase()) {
@@ -1849,10 +1529,11 @@ export default function App() {
         return;
       }
 
-      setSystemUsers((prev) =>
-        prev.map((item) => (item.email === id ? { ...item, suspended: 1 } : item))
-      );
-      syncToServer(`/api/users/${id}`, "DELETE");
+      const updated = systemUsers.map((item) => (item.email === id ? { ...item, suspended: 1 } : item));
+      setSystemUsers(updated);
+      localStorage.setItem("crm_users", JSON.stringify(updated));
+      await syncToServer(`/api/users/${id}`, "DELETE");
+      await loadSQLiteState();
       showToast("Operator profile suspended.", "info");
     }
     setSelectedItem(null);
@@ -1862,9 +1543,9 @@ export default function App() {
     try {
       const targetUser = systemUsers.find((u) => u.email === email);
       if (targetUser) {
-        setSystemUsers((prev) =>
-          prev.map((item) => (item.email === email ? { ...item, suspended: 0 } : item))
-        );
+        const updated = systemUsers.map((item) => (item.email === email ? { ...item, suspended: 0 } : item));
+        setSystemUsers(updated);
+        localStorage.setItem("crm_users", JSON.stringify(updated));
         const res = await fetch(`/api/users/${email}/restore`, { method: "POST" });
         if (res.ok) {
           showToast(`Seat privileges restored successfully for ${targetUser.name}.`, "success");
@@ -1877,6 +1558,60 @@ export default function App() {
       console.error(e);
       showToast("Failed to restore operator seat.", "error");
     }
+  };
+
+  const handlePermanentDeleteUser = async (email: string, name: string) => {
+    if (session?.role !== "Senior Analyst") {
+      showToast("Access Denied: Only a Senior Analyst (Administrator) can permanently remove operator accounts.", "error");
+      return;
+    }
+    if (email.toLowerCase() === session?.email?.toLowerCase()) {
+      showToast("Constraint Violation: You cannot delete your own active operator seat session.", "error");
+      return;
+    }
+    const activeUsers = systemUsers.filter((u) => !u.suspended);
+    if (activeUsers.length <= 1 && !systemUsers.find((u) => u.email === email)?.suspended) {
+      showToast("Constraint Violation: Workspace must retain at least 1 active operator seat before deleting.", "error");
+      return;
+    }
+    const activeSeniorAnalysts = systemUsers.filter((u) => u.role === "Senior Analyst" && !u.suspended);
+    const targetUser = systemUsers.find((u) => u.email === email);
+    if (targetUser && targetUser.role === "Senior Analyst" && !targetUser.suspended && activeSeniorAnalysts.length <= 1) {
+      showToast("Constraint Violation: Workspace must retain at least 1 active Primary Seat (Senior Analyst) Operator before deletion.", "error");
+      return;
+    }
+
+    showConfirm(
+      "Remove Operator Account Permanently",
+      `Are you absolutely certain you want to permanently delete the operator account for "${name}" (${email})? This action is completely irreversible and deletes their profile from the central SQLite registry.`,
+      async () => {
+        try {
+          const res = await fetch(`/api/users/${encodeURIComponent(email)}/permanent`, {
+            method: "DELETE",
+            headers: {
+              "X-User-Email": session?.email || "",
+              "X-User-Name": session?.name || "",
+              "X-User-Role": session?.role || ""
+            }
+          });
+          if (res.ok) {
+            setSystemUsers((prev) => {
+              const updated = prev.filter((item) => item.email !== email);
+              localStorage.setItem("crm_users", JSON.stringify(updated));
+              return updated;
+            });
+            showToast(`Operator account for ${name} has been permanently removed.`, "success");
+            await loadSQLiteState();
+          } else {
+            const errText = await res.text();
+            showToast(`Failed to permanently delete operator account: ${errText || "unspecified error"}`, "error");
+          }
+        } catch (err) {
+          console.error(err);
+          showToast("Error permanently deleting operator account.", "error");
+        }
+      }
+    );
   };
 
   // Dynamic Connection Sync Helpers inside open drawer
@@ -2454,9 +2189,10 @@ export default function App() {
                 New user? <button type="button" onClick={() => setAuthScreen("signup")} className="text-blue-500 font-bold hover:underline">Register Profile</button>
               </div>
 
-              <div className="p-3 bg-slate-950/40 border border-slate-800/40 rounded-lg text-center font-mono text-[9px] text-slate-500">
-                <span className="font-bold text-slate-400">Pre-Seeded Credentials:</span>
-                <p>david@enterprise.com | password123</p>
+              <div className="p-3 bg-slate-950/40 border border-slate-800/40 rounded-lg text-center font-mono text-[9px] text-slate-500 space-y-1">
+                <span className="font-bold text-slate-400">Pre-Seeded Credentials (Password: password123):</span>
+                <p>admin@enterprise.com (System Admin)</p>
+                <p>david@enterprise.com (Senior Analyst)</p>
               </div>
             </form>
           )}
@@ -3503,17 +3239,22 @@ export default function App() {
                   </div>
                   
                   {(interactionAssigneeFilter !== "ALL" || interactionTimeRangeFilter !== "ALL" || interactionStartDateFilter || interactionEndDateFilter) && (
-                    <button
-                      onClick={() => {
-                        setInteractionAssigneeFilter("ALL");
-                        setInteractionTimeRangeFilter("ALL");
-                        setInteractionStartDateFilter("");
-                        setInteractionEndDateFilter("");
-                      }}
-                      className="px-2.5 py-1 text-[10px] font-extrabold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition"
-                    >
-                      Reset All Filters
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-extrabold rounded-md font-mono">
+                        Matches: {filteredInteractions.length}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setInteractionAssigneeFilter("ALL");
+                          setInteractionTimeRangeFilter("ALL");
+                          setInteractionStartDateFilter("");
+                          setInteractionEndDateFilter("");
+                        }}
+                        className="px-2.5 py-1 text-[10px] font-extrabold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition"
+                      >
+                        Reset All Filters
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -3529,9 +3270,9 @@ export default function App() {
                       >
                         <option value="ALL">All Assignees (Reset)</option>
                         {allAvailableAssignees.map((assignee) => (
-                          <option key={assignee} value={assignee}>
-                            👤 {assignee}
-                          </option>
+                           <option key={assignee} value={assignee}>
+                             👤 {assignee}
+                           </option>
                         ))}
                       </select>
                       <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400">
@@ -3546,7 +3287,15 @@ export default function App() {
                     <div className="relative">
                       <select
                         value={interactionTimeRangeFilter}
-                        onChange={(e) => setInteractionTimeRangeFilter(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setInteractionTimeRangeFilter(val);
+                          if (val !== "CUSTOM") {
+                            // Automatically clear specific custom dates if selecting quick presets
+                            setInteractionStartDateFilter("");
+                            setInteractionEndDateFilter("");
+                          }
+                        }}
                         className="w-full bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 cursor-pointer appearance-none"
                       >
                         <option value="ALL">All Logged Actions</option>
@@ -3562,33 +3311,24 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Filter 3: Custom Date Selection Spans */}
-                  {interactionTimeRangeFilter === "CUSTOM" ? (
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider font-mono block">Custom Range Spans</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="date"
-                          value={interactionStartDateFilter}
-                          onChange={(e) => setInteractionStartDateFilter(e.target.value)}
-                          className="w-1/2 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-700 font-bold focus:outline-none focus:ring-2 focus:ring-blue-100"
-                        />
-                        <span className="text-slate-400 font-bold text-xs">to</span>
-                        <input
-                          type="date"
-                          value={interactionEndDateFilter}
-                          onChange={(e) => setInteractionEndDateFilter(e.target.value)}
-                          className="w-1/2 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-700 font-bold focus:outline-none focus:ring-2 focus:ring-blue-100"
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-center p-3 border border-dashed border-slate-150 rounded-xl bg-slate-50/50">
-                      <p className="text-[10px] text-slate-400 italic text-center leading-normal">
-                        Active Selection Matches: <strong className="text-blue-600">{filteredInteractions.length}</strong> items
-                      </p>
-                    </div>
-                  )}
+                  {/* Filter 3: Premium Date Range Picker Component */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider font-mono block">Custom Date Span</label>
+                    <DateRangePicker
+                      startDate={interactionStartDateFilter}
+                      endDate={interactionEndDateFilter}
+                      onChange={(start, end) => {
+                        setInteractionStartDateFilter(start);
+                        setInteractionEndDateFilter(end);
+                        setInteractionTimeRangeFilter("CUSTOM");
+                      }}
+                      onClear={() => {
+                        setInteractionStartDateFilter("");
+                        setInteractionEndDateFilter("");
+                        setInteractionTimeRangeFilter("ALL");
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -3858,12 +3598,13 @@ export default function App() {
                             
                             <button
                               onClick={() => {
-                                setCalendarYear(2026);
-                                setCalendarMonth(5); // June is index 5
+                                const now = new Date();
+                                setCalendarYear(now.getFullYear());
+                                setCalendarMonth(now.getMonth());
                               }}
                               className="px-3 py-1.5 text-xs font-extrabold font-sans bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-100 rounded-lg transition"
                             >
-                              Target Month (June '26)
+                              Go to Today
                             </button>
 
                             <button
@@ -3910,7 +3651,8 @@ export default function App() {
                           <div className="grid grid-cols-7 gap-1 bg-slate-100/50 rounded-xl overflow-visible p-1">
                             {allCalendarDays.map((day, cellIndex) => {
                               const isCurrentMonth = day.monthType === "current";
-                              const isToday = day.dayNum === 7 && day.month === 5 && day.year === 2026; // June 7, 2026 from local metadata
+                              const now = new Date();
+                              const isToday = day.dayNum === now.getDate() && day.month === now.getMonth() && day.year === now.getFullYear();
                               
                               // Format date as YYYY-MM-DD
                               const dateStr = `${day.year}-${String(day.month + 1).padStart(2, "0")}-${String(day.dayNum).padStart(2, "0")}`;
@@ -3919,12 +3661,38 @@ export default function App() {
                               return (
                                 <div
                                   key={`${day.year}-${day.month}-${day.dayNum}-${cellIndex}`}
+                                  onDragOver={(e) => {
+                                    e.preventDefault();
+                                    e.dataTransfer.dropEffect = "move";
+                                  }}
+                                  onDragEnter={(e) => {
+                                    e.preventDefault();
+                                    setDragOverDate(dateStr);
+                                  }}
+                                  onDragLeave={() => {
+                                    if (dragOverDate === dateStr) {
+                                      setDragOverDate(null);
+                                    }
+                                  }}
+                                  onDrop={async (e) => {
+                                    e.preventDefault();
+                                    setDragOverDate(null);
+                                    const interactionId = e.dataTransfer.getData("text/plain");
+                                    if (!interactionId) return;
+                                    const itemToUpdate = interactions.find((i) => i.id === interactionId);
+                                    if (!itemToUpdate) return;
+                                    if (itemToUpdate.date === dateStr) return;
+                                    const updatedPayload = { ...itemToUpdate, date: dateStr };
+                                    await handleUpdateItem("interaction", updatedPayload);
+                                  }}
                                   className={`min-h-[115px] p-2 rounded-lg border transition-all flex flex-col justify-between overflow-visible relative ${
-                                    isCurrentMonth 
-                                      ? isToday 
-                                        ? "bg-blue-50/50 border-blue-400 ring-2 ring-blue-100/40 shadow-inner"
-                                        : "bg-white border-slate-200/70 hover:bg-slate-50/60"
-                                      : "bg-slate-50/70 text-slate-350 border-slate-200/40 opacity-55"
+                                    dragOverDate === dateStr
+                                      ? "bg-indigo-50/70 border-indigo-400 ring-2 ring-indigo-200 shadow-md"
+                                      : isCurrentMonth 
+                                        ? isToday 
+                                          ? "bg-blue-50/50 border-blue-400 ring-2 ring-blue-100/40 shadow-inner"
+                                          : "bg-white border-slate-200/70 hover:bg-slate-50/60"
+                                        : "bg-slate-50/70 text-slate-350 border-slate-200/40 opacity-55"
                                   }`}
                                 >
                                   {/* Cell Date Header and indicator */}
@@ -3970,7 +3738,12 @@ export default function App() {
                                       return (
                                         <div
                                           key={item.id}
-                                          className="relative group/intpill"
+                                          className="relative group/intpill cursor-grab active:cursor-grabbing"
+                                          draggable={true}
+                                          onDragStart={(e) => {
+                                            e.dataTransfer.setData("text/plain", item.id);
+                                            e.dataTransfer.effectAllowed = "move";
+                                          }}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             setSelectedItem({ dataType: "interaction", data: item });
@@ -4463,6 +4236,16 @@ export default function App() {
                     📋 Stakeholder Roster
                   </button>
                   <button
+                    onClick={() => setEntitiesViewMode("map")}
+                    className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                      entitiesViewMode === "map"
+                        ? "bg-white text-slate-905 shadow-xs border border-slate-200/50"
+                        : "text-slate-550 hover:text-slate-950"
+                    }`}
+                  >
+                    🗺️ Coverage Map
+                  </button>
+                  <button
                     onClick={() => setEntitiesViewMode("dashboard")}
                     className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
                       entitiesViewMode === "dashboard"
@@ -4626,6 +4409,11 @@ export default function App() {
                 })}
               </div>
             </div>
+          ) : entitiesViewMode === "map" ? (
+            <EntitiesMap
+              entities={displayedEntities}
+              onSelectEntity={(ent) => setSelectedItem({ dataType: "entity", data: ent })}
+            />
           ) : (
               <EntitiesDashboard
                 entities={entities}
@@ -4688,7 +4476,8 @@ export default function App() {
 
               {/* ENGAGEMENT LIFECYCLE TIMELINE COMPONENT */}
               {(() => {
-                const todayStr = "2026-06-07";
+                const todayObj = new Date();
+                const todayStr = `${todayObj.getFullYear()}-${String(todayObj.getMonth() + 1).padStart(2, "0")}-${String(todayObj.getDate()).padStart(2, "0")}`;
                 const todayDate = new Date(todayStr);
 
                 // Filter based on selected timeline filter: Active-only vs All non-closed
@@ -4765,7 +4554,7 @@ export default function App() {
                           <h3 className="text-sm font-extrabold tracking-wider uppercase font-mono text-sky-600">Active Project Lifecycles</h3>
                         </div>
                         <p className="text-[10.5px] text-slate-500 font-semibold leading-none mt-1">
-                          Visual start-to-end timeline relative to Today • <strong className="text-slate-900">June 7, 2026</strong>
+                          Visual start-to-end timeline relative to Today • <strong className="text-slate-900">{new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</strong>
                         </p>
                       </div>
 
@@ -5284,11 +5073,16 @@ export default function App() {
                           </div>
                           <button
                             onClick={() => {
-                              if (confirm("Are you sure you want to discard this ledger note?")) {
-                                setNotes((prev) => prev.filter((n) => n.id !== note.id));
-                                showToast("Note discarded from Workspace ledger.", "info");
-                                syncToServer(`/api/notes/${note.id}`, "DELETE");
-                              }
+                              showConfirm(
+                                "Discard Note",
+                                "Are you sure you want to discard this ledger note?",
+                                async () => {
+                                  setNotes((prev) => prev.filter((n) => n.id !== note.id));
+                                  showToast("Note discarded from Workspace ledger.", "info");
+                                  await syncToServer(`/api/notes/${note.id}`, "DELETE");
+                                  await loadSQLiteState();
+                                }
+                              );
                             }}
                             className="p-1 text-slate-400 hover:text-rose-500 rounded hover:bg-rose-50 transition cursor-pointer"
                             title="Discard note file"
@@ -5430,10 +5224,16 @@ export default function App() {
                           </span>
                           <button
                             onClick={() => {
-                              if (confirm(`Do you wish to discard document registration for ${doc.title}?`)) {
-                                setDocuments((prev) => prev.filter((d) => d.id !== doc.id));
-                                showToast("Document index entries purged from vault.", "info");
-                              }
+                              showConfirm(
+                                "Discard Document",
+                                `Do you wish to discard document registration for ${doc.title}?`,
+                                async () => {
+                                  setDocuments((prev) => prev.filter((d) => d.id !== doc.id));
+                                  showToast("Document index entries purged from vault.", "info");
+                                  await syncToServer(`/api/documents/${doc.id}`, "DELETE");
+                                  await loadSQLiteState();
+                                }
+                              );
                             }}
                             className="p-1 text-slate-400 hover:text-rose-500 rounded hover:bg-rose-50 transition cursor-pointer"
                             title="Discard document entry"
@@ -5544,24 +5344,42 @@ export default function App() {
                         <span className="text-[10px] text-indigo-500 bg-indigo-50/50 font-bold px-2 py-0.5 rounded border border-indigo-100/50">
                           Your Active Session
                         </span>
-                      ) : usr.suspended ? (
-                        <button
-                          onClick={() => handleRestoreUser(usr.email)}
-                          className="px-2.5 py-1 text-xs font-bold text-emerald-600 hover:text-white bg-emerald-50 hover:bg-emerald-600 rounded-lg border border-emerald-100 hover:border-emerald-600 transition cursor-pointer"
-                        >
-                          Reactivate Seat
-                        </button>
                       ) : (
-                        <button
-                          onClick={() => {
-                            if (confirm(`Are you sure you want to suspend access seat privileges (soft-delete) for ${usr.name}?`)) {
-                              handleDeleteItem("user", usr.email);
-                            }
-                          }}
-                          className="px-2.5 py-1 text-xs font-bold text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 rounded-lg border border-rose-100 hover:border-rose-600 transition cursor-pointer"
-                        >
-                          Suspend Seat
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          {usr.suspended ? (
+                            <button
+                              onClick={() => handleRestoreUser(usr.email)}
+                              className="px-2.5 py-1 text-xs font-bold text-emerald-600 hover:text-white bg-emerald-50 hover:bg-emerald-600 rounded-lg border border-emerald-100 hover:border-emerald-600 transition cursor-pointer"
+                            >
+                              Reactivate
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                showConfirm(
+                                  "Suspend User Seat",
+                                  `Are you sure you want to suspend access seat privileges (soft-delete) for ${usr.name}?`,
+                                  () => {
+                                    handleDeleteItem("user", usr.email);
+                                  }
+                                );
+                              }}
+                              className="px-2.5 py-1 text-xs font-bold text-slate-600 hover:text-white bg-slate-100 hover:bg-slate-600 rounded-lg border border-slate-200 hover:border-slate-600 transition cursor-pointer"
+                            >
+                              Suspend
+                            </button>
+                          )}
+                          
+                          {session?.role === "Senior Analyst" && (
+                            <button
+                              onClick={() => handlePermanentDeleteUser(usr.email, usr.name || usr.email)}
+                              className="px-2.5 py-1 text-xs font-bold text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 rounded-lg border border-rose-100 hover:border-rose-600 transition cursor-pointer"
+                              title="Permanently remove this operator account from the database"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -6689,8 +6507,8 @@ export default function App() {
                   <div className="space-y-1">
                     {searchResults.interactions.map((i) => (
                       <div key={i.id} onClick={() => { setSelectedItem({ dataType: "interaction", data: i }); setIsSearchActive(false); setSearchQuery(""); }} className="p-2 hover:bg-slate-50 border border-transparent hover:border-slate-100 rounded-lg cursor-pointer">
-                        <p className="font-semibold text-xs text-slate-900">{i.subject}</p>
-                        <p className="text-[10px] text-slate-500">Corporate client mapping: {i.client}</p>
+                        <p className="font-semibold text-xs text-slate-900">{highlightText(i.subject, searchQuery)}</p>
+                        <p className="text-[10px] text-slate-500">Corporate client mapping: {highlightText(i.client, searchQuery)}</p>
                       </div>
                     ))}
                   </div>
@@ -6703,8 +6521,8 @@ export default function App() {
                   <div className="space-y-1">
                     {searchResults.contacts.map((c) => (
                       <div key={c.id} onClick={() => { setSelectedItem({ dataType: "contact", data: c }); setIsSearchActive(false); setSearchQuery(""); }} className="p-2 hover:bg-slate-50 border border-transparent hover:border-slate-100 rounded-lg cursor-pointer">
-                        <p className="font-semibold text-xs text-slate-900">{c.name}</p>
-                        <p className="text-[10px] text-slate-500">{c.role} at {c.company}</p>
+                        <p className="font-semibold text-xs text-slate-900">{highlightText(c.name, searchQuery)}</p>
+                        <p className="text-[10px] text-slate-500">{highlightText(c.role, searchQuery)} at {highlightText(c.company, searchQuery)}</p>
                       </div>
                     ))}
                   </div>
@@ -6717,8 +6535,22 @@ export default function App() {
                   <div className="space-y-1">
                     {searchResults.entities.map((e) => (
                       <div key={e.id} onClick={() => { setSelectedItem({ dataType: "entity", data: e }); setIsSearchActive(false); setSearchQuery(""); }} className="p-2 hover:bg-slate-50 border border-transparent hover:border-slate-100 rounded-lg cursor-pointer">
-                        <p className="font-semibold text-xs text-slate-900">{e.name}</p>
-                        <p className="text-[10px] text-slate-500">{e.industry} and based in {e.location}</p>
+                        <p className="font-semibold text-xs text-slate-900">{highlightText(e.name, searchQuery)}</p>
+                        <p className="text-[10px] text-slate-500">{highlightText(e.industry, searchQuery)} and based in {highlightText(e.location, searchQuery)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Engagements ({searchResults.engagements.length})</h4>
+                {searchResults.engagements.length === 0 ? <p className="text-xs text-slate-400 italic">No matches</p> : (
+                  <div className="space-y-1">
+                    {searchResults.engagements.map((g) => (
+                      <div key={g.id} onClick={() => { setSelectedItem({ dataType: "engagement", data: g }); setIsSearchActive(false); setSearchQuery(""); }} className="p-2 hover:bg-slate-50 border border-transparent hover:border-slate-100 rounded-lg cursor-pointer">
+                        <p className="font-semibold text-xs text-slate-900">{highlightText(g.title, searchQuery)}</p>
+                        <p className="text-[10px] text-slate-500">{highlightText(g.type, searchQuery)} &bull; {highlightText(g.client, searchQuery)}</p>
                       </div>
                     ))}
                   </div>
@@ -6899,8 +6731,8 @@ export default function App() {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-slate-500 font-bold mb-1">Coordinates Email</label>
-                      <input type="email" required value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none" />
+                      <label className="block text-slate-500 font-bold mb-1">Coordinates Email (Optional)</label>
+                      <input type="email" value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none" />
                     </div>
                     <div>
                       <label className="block text-slate-500 font-bold mb-1">Primary Desk Phone</label>
@@ -7077,7 +6909,9 @@ export default function App() {
                     <div>
                       <label className="block text-slate-500 font-bold mb-1">Operator System Role</label>
                       <select value={operatorForm.role} onChange={(e) => setOperatorForm({ ...operatorForm, role: e.target.value })} className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none text-slate-705 font-semibold">
-                        <option value="Senior Analyst">Senior Analyst</option>
+                        {session?.role === "Senior Analyst" && (
+                          <option value="Senior Analyst">Senior Analyst (System Administrator)</option>
+                        )}
                         <option value="Senior Operator">Senior Operator</option>
                         <option value="Auditor Seat">Auditor Seat</option>
                         <option value="Associate Coordinator">Associate Coordinator</option>
@@ -7349,10 +7183,10 @@ export default function App() {
                       />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Primary Email Contact</label>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Primary Email Contact (Optional)</label>
                       <input
                         type="email"
-                        value={selectedItem.data.email}
+                        value={selectedItem.data.email || ""}
                         onChange={(e) => setSelectedItem({ ...selectedItem, data: { ...selectedItem.data, email: e.target.value } })}
                         className="w-full bg-slate-50 border p-2.5 rounded-lg font-semibold outline-none"
                       />
@@ -8301,6 +8135,46 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* SYSTEM CONFIRM MODAL OVERLAY */}
+      {confirmDialog && (
+        <div id="custom-system-confirm" className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex justify-center items-center z-[9999] animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 w-full max-w-md space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="space-y-2">
+              <h3 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-amber-500 shrink-0" />
+                {confirmDialog.title}
+              </h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                {confirmDialog.message}
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 text-xs pt-2">
+              <button
+                id="confirm-cancel"
+                onClick={() => setConfirmDialog(null)}
+                className="px-4 py-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white font-bold tracking-wide transition border border-transparent hover:border-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                id="confirm-ok"
+                onClick={() => {
+                  try {
+                    confirmDialog.onConfirm();
+                  } catch (e) {
+                    console.error("Error executing custom confirm callback:", e);
+                  }
+                  setConfirmDialog(null);
+                }}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold tracking-wide shadow-md transition"
+              >
+                Proceed
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

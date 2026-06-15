@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import Database from "better-sqlite3";
-import { createServer as createViteServer } from "vite";
 import { WebSocketServer, WebSocket } from "ws";
 import { parse } from "url";
 
@@ -242,7 +241,29 @@ async function startServer() {
       "David Jenkins",
       "Senior Analyst"
     );
+    const adminHash = getNewHash("password123", "admin@enterprise.com");
+    db.prepare("INSERT INTO users (email, passwordHash, name, role) VALUES (?, ?, ?, ?)").run(
+      "admin@enterprise.com",
+      adminHash,
+      "System Administrator",
+      "Senior Analyst"
+    );
   } else {
+    try {
+      const adminExists = db.prepare("SELECT email FROM users WHERE email = ?").get("admin@enterprise.com");
+      if (!adminExists) {
+        const adminHash = getNewHash("password123", "admin@enterprise.com");
+        db.prepare("INSERT INTO users (email, passwordHash, name, role) VALUES (?, ?, ?, ?)").run(
+          "admin@enterprise.com",
+          adminHash,
+          "System Administrator",
+          "Senior Analyst"
+        );
+      }
+    } catch (e: any) {
+      console.error("Failed to ensure default admin exists:", e.message);
+    }
+
     // Dynamic migration handler: Upgrade old default password hash to new email-seeded hash
     try {
       const david = db.prepare("SELECT * FROM users WHERE email = ?").get("david@enterprise.com") as any;
@@ -263,11 +284,11 @@ async function startServer() {
   const countTags = db.prepare("SELECT count(*) as count FROM tags").get() as { count: number };
   if (countTags.count === 0) {
     const seedTags = [
-      { id: "tag-1", name: "High Priority", color: "red" },
-      { id: "tag-2", name: "Follow Up", color: "amber" },
-      { id: "tag-3", name: "Technical Audit", color: "blue" },
-      { id: "tag-4", name: "Onboarding", color: "emerald" },
-      { id: "tag-5", name: "Monthly QBR", color: "purple" }
+      { id: "tag-1", name: "API Integration", color: "indigo" },
+      { id: "tag-2", name: "MVP Stage", color: "emerald" },
+      { id: "tag-3", name: "Technical Debt", color: "red" },
+      { id: "tag-4", name: "Open Source", color: "blue" },
+      { id: "tag-5", name: "User Feedback", color: "purple" }
     ];
     const stmt = db.prepare("INSERT INTO tags (id, name, color) VALUES (?, ?, ?)");
     for (const t of seedTags) {
@@ -280,44 +301,44 @@ async function startServer() {
   if (countGrouped.count === 0) {
     const seedGroupedTags = [
       // eng_type
-      { id: "gt-1", name: "SOW Contract", color: "blue", groupName: "eng_type" },
-      { id: "gt-2", name: "Marketing Campaign", color: "purple", groupName: "eng_type" },
-      { id: "gt-3", name: "Retainer", color: "emerald", groupName: "eng_type" },
-      { id: "gt-4", name: "Advisory Initiative", color: "indigo", groupName: "eng_type" },
+      { id: "gt-1", name: "SaaS Product Demo", color: "blue", groupName: "eng_type" },
+      { id: "gt-2", name: "Custom Integration", color: "purple", groupName: "eng_type" },
+      { id: "gt-3", name: "Architecture Advisory", color: "emerald", groupName: "eng_type" },
+      { id: "gt-4", name: "Seed/Series A Review", color: "indigo", groupName: "eng_type" },
 
       // eng_status
-      { id: "gt-5", name: "Active", color: "emerald", groupName: "eng_status" },
-      { id: "gt-6", name: "Pending Draft", color: "blue", groupName: "eng_status" },
-      { id: "gt-7", name: "Closed", color: "indigo", groupName: "eng_status" },
-      { id: "gt-8", name: "Under Negotiation", color: "amber", groupName: "eng_status" },
+      { id: "gt-5", name: "In MVP Sandbox", color: "blue", groupName: "eng_status" },
+      { id: "gt-6", name: "In Production", color: "emerald", groupName: "eng_status" },
+      { id: "gt-7", name: "Security Review", color: "indigo", groupName: "eng_status" },
+      { id: "gt-8", name: "Investor Negotiation", color: "amber", groupName: "eng_status" },
 
       // int_type
-      { id: "gt-9", name: "Meeting", color: "blue", groupName: "int_type" },
-      { id: "gt-10", name: "Email Sync", color: "amber", groupName: "int_type" },
-      { id: "gt-11", name: "Support Call", color: "red", groupName: "int_type" },
-      { id: "gt-12", name: "Review Session", color: "purple", groupName: "int_type" },
+      { id: "gt-9", name: "Code Review Sync", color: "blue", groupName: "int_type" },
+      { id: "gt-10", name: "User Q&A Session", color: "amber", groupName: "int_type" },
+      { id: "gt-11", name: "Investor Pitch", color: "purple", groupName: "int_type" },
+      { id: "gt-12", name: "SLA Support Call", color: "red", groupName: "int_type" },
 
       // contact_role
-      { id: "gt-13", name: "VP of Partnerships", color: "indigo", groupName: "contact_role" },
-      { id: "gt-14", name: "Managing Director", color: "purple", groupName: "contact_role" },
-      { id: "gt-15", name: "Lead Developer", color: "blue", groupName: "contact_role" },
-      { id: "gt-16", name: "Senior Analyst", color: "purple", groupName: "contact_role" },
-      { id: "gt-17", name: "Stakeholder", color: "indigo", groupName: "contact_role" },
-      { id: "gt-18", name: "VP of Operations", color: "amber", groupName: "contact_role" },
+      { id: "gt-13", name: "Lead Developer", color: "blue", groupName: "contact_role" },
+      { id: "gt-14", name: "Technical Founder", color: "purple", groupName: "contact_role" },
+      { id: "gt-15", name: "Venture Partner", color: "indigo", groupName: "contact_role" },
+      { id: "gt-16", name: "VP of Engineering", color: "amber", groupName: "contact_role" },
+      { id: "gt-17", name: "External Auditor", color: "emerald", groupName: "contact_role" },
+      { id: "gt-18", name: "Product Manager", color: "pink", groupName: "contact_role" },
 
       // company_industry
-      { id: "gt-19", name: "Aerospace & Defense", color: "blue", groupName: "company_industry" },
-      { id: "gt-20", name: "Financial Services", color: "emerald", groupName: "company_industry" },
-      { id: "gt-21", name: "Biotechnology", color: "indigo", groupName: "company_industry" },
-      { id: "gt-22", name: "E-Commerce", color: "amber", groupName: "company_industry" },
-      { id: "gt-23", name: "Enterprise SaaS", color: "purple", groupName: "company_industry" },
-      { id: "gt-24", name: "Robotics & AI", color: "red", groupName: "company_industry" },
+      { id: "gt-19", name: "Developer Tooling", color: "blue", groupName: "company_industry" },
+      { id: "gt-20", name: "Web3 & Cloud Infra", color: "emerald", groupName: "company_industry" },
+      { id: "gt-21", name: "Artificial Intelligence", color: "indigo", groupName: "company_industry" },
+      { id: "gt-22", name: "SaaS Platform", color: "amber", groupName: "company_industry" },
+      { id: "gt-23", name: "FinTech / Payments", color: "purple", groupName: "company_industry" },
+      { id: "gt-24", name: "Robotics & Hardware", color: "red", groupName: "company_industry" },
 
       // company_tier
-      { id: "gt-25", name: "Strategic", color: "emerald", groupName: "company_tier" },
-      { id: "gt-26", name: "Enterprise", color: "blue", groupName: "company_tier" },
-      { id: "gt-27", name: "Key Account", color: "purple", groupName: "company_tier" },
-      { id: "gt-28", name: "Growth", color: "amber", groupName: "company_tier" }
+      { id: "gt-25", name: "Strategic Enterprise", color: "emerald", groupName: "company_tier" },
+      { id: "gt-26", name: "Series A/B Backed", color: "blue", groupName: "company_tier" },
+      { id: "gt-27", name: "Bootstrapped Startup", color: "purple", groupName: "company_tier" },
+      { id: "gt-28", name: "Pre-seed Venture", color: "amber", groupName: "company_tier" }
     ];
     const stmt = db.prepare("INSERT INTO tags (id, name, color, groupName) VALUES (?, ?, ?, ?)");
     for (const t of seedGroupedTags) {
@@ -329,12 +350,12 @@ async function startServer() {
   const countIntContRoles = db.prepare("SELECT count(*) as count FROM tags WHERE groupName = 'int_cont_role'").get() as { count: number };
   if (countIntContRoles.count === 0) {
     const intContSeedTags = [
-      { id: "gt-29", name: "Executive Sponsor", color: "indigo", groupName: "int_cont_role" },
-      { id: "gt-30", name: "Technical Buyer", color: "blue", groupName: "int_cont_role" },
-      { id: "gt-31", name: "Champion", color: "emerald", groupName: "int_cont_role" },
-      { id: "gt-32", name: "Blocker", color: "red", groupName: "int_cont_role" },
-      { id: "gt-33", name: "Influencer", color: "purple", groupName: "int_cont_role" },
-      { id: "gt-34", name: "Evaluator", color: "amber", groupName: "int_cont_role" }
+      { id: "gt-29", name: "Technical Champion", color: "emerald", groupName: "int_cont_role" },
+      { id: "gt-30", name: "System Architect", color: "blue", groupName: "int_cont_role" },
+      { id: "gt-31", name: "Dev Advocate", color: "purple", groupName: "int_cont_role" },
+      { id: "gt-32", name: "Internal Blocker", color: "red", groupName: "int_cont_role" },
+      { id: "gt-33", name: "Product Manager", color: "indigo", groupName: "int_cont_role" },
+      { id: "gt-34", name: "Venture Evaluator", color: "amber", groupName: "int_cont_role" }
     ];
     const stmt = db.prepare("INSERT INTO tags (id, name, color, groupName) VALUES (?, ?, ?, ?)");
     for (const t of intContSeedTags) {
@@ -346,11 +367,11 @@ async function startServer() {
   const countDocTypes = db.prepare("SELECT count(*) as count FROM tags WHERE groupName = 'doc_type'").get() as { count: number };
   if (countDocTypes.count === 0) {
     const docTypeSeeds = [
-      { id: "gt-dt-1", name: "PDF", color: "red", groupName: "doc_type" },
-      { id: "gt-dt-2", name: "Spreadsheet", color: "emerald", groupName: "doc_type" },
-      { id: "gt-dt-3", name: "Presentation", color: "orange", groupName: "doc_type" },
-      { id: "gt-dt-4", name: "Contract", color: "blue", groupName: "doc_type" },
-      { id: "gt-dt-5", name: "Briefing", color: "purple", groupName: "doc_type" }
+      { id: "gt-dt-1", name: "API Specification", color: "red", groupName: "doc_type" },
+      { id: "gt-dt-2", name: "Architecture Diagram", color: "emerald", groupName: "doc_type" },
+      { id: "gt-dt-3", name: "Pitch Deck", color: "orange", groupName: "doc_type" },
+      { id: "gt-dt-4", name: "SLA Master Contract", color: "blue", groupName: "doc_type" },
+      { id: "gt-dt-5", name: "Product Brief", color: "purple", groupName: "doc_type" }
     ];
     const stmt = db.prepare("INSERT INTO tags (id, name, color, groupName) VALUES (?, ?, ?, ?)");
     for (const t of docTypeSeeds) {
@@ -363,7 +384,7 @@ async function startServer() {
   if (countIntStatuses.count === 0) {
     const intStatusSeeds = [
       { id: "gt-is-1", name: "IN PROGRESS", color: "blue", groupName: "int_status" },
-      { id: "gt-is-2", name: "COMPLETED", color: "emerald", groupName: "int_status" },
+      { id: "gt-is-2", name: "PASSED REVIEW", color: "emerald", groupName: "int_status" },
       { id: "gt-is-3", name: "SCHEDULED", color: "purple", groupName: "int_status" },
       { id: "gt-is-4", name: "BLOCKED", color: "red", groupName: "int_status" }
     ];
@@ -377,11 +398,11 @@ async function startServer() {
   const countChecklist = db.prepare("SELECT count(*) as count FROM tags WHERE groupName = 'oper_checklist'").get() as { count: number };
   if (countChecklist.count === 0) {
     const checklistSeeds = [
-      { id: "checklist-nda", name: "NDA Signed", color: "blue", groupName: "oper_checklist" },
-      { id: "checklist-kyc", name: "KYC Verified", color: "emerald", groupName: "oper_checklist" },
-      { id: "checklist-onboard", name: "Onboarding Sequence", color: "purple", groupName: "oper_checklist" },
+      { id: "checklist-nda", name: "Source Agreement Signed", color: "blue", groupName: "oper_checklist" },
+      { id: "checklist-kyc", name: "GitHub Repo Access Shared", color: "emerald", groupName: "oper_checklist" },
+      { id: "checklist-onboard", name: "Cloud Credentials Kept", color: "purple", groupName: "oper_checklist" },
       { id: "checklist-sec", name: "Security Audit Checked", color: "red", groupName: "oper_checklist" },
-      { id: "checklist-proposal", name: "Proposal Tendered", color: "indigo", groupName: "oper_checklist" }
+      { id: "checklist-proposal", name: "Vesting Schedule Set", color: "indigo", groupName: "oper_checklist" }
     ];
     const stmt = db.prepare("INSERT INTO tags (id, name, color, groupName) VALUES (?, ?, ?, ?)");
     for (const t of checklistSeeds) {
@@ -389,249 +410,7 @@ async function startServer() {
     }
   }
 
-  // Seed notes
-  const countNotes = db.prepare("SELECT count(*) as count FROM notes").get() as { count: number };
-  if (countNotes.count === 0) {
-    const seedNotes = [
-      {
-        id: "note-1",
-        content: "Customer requested prioritising marketing deliverables ahead of technical onboarding.",
-        createdAt: "2026-06-05T14:30:00Z",
-        author: "Sarah K.",
-        linkedToType: "interaction",
-        linkedToId: "int-1"
-      },
-      {
-        id: "note-2",
-        content: "Deploying server-side layers, database sync tests verified successfully.",
-        createdAt: "2026-06-02T10:15:00Z",
-        author: "Michael R.",
-        linkedToType: "interaction",
-        linkedToId: "int-2"
-      },
-      {
-        id: "note-3",
-        content: "Prefers email communications over secondary desk dialer logs.",
-        createdAt: "2026-06-01T09:00:00Z",
-        author: "David J.",
-        linkedToType: "contact",
-        linkedToId: "con-1"
-      }
-    ];
-    const stmt = db.prepare("INSERT INTO notes (id, content, createdAt, author, linkedToType, linkedToId) VALUES (?, ?, ?, ?, ?, ?)");
-    for (const n of seedNotes) {
-      stmt.run(n.id, n.content, n.createdAt, n.author, n.linkedToType, n.linkedToId);
-    }
-  }
-
-  // Seed documents
-  const countDocs = db.prepare("SELECT count(*) as count FROM documents").get() as { count: number };
-  if (countDocs.count === 0) {
-    const seedDocs = [
-      {
-        id: "doc-1",
-        title: "Q4 Marketing Milestones Blueprint",
-        fileType: "PDF",
-        fileSize: "2.4 MB",
-        uploadedAt: "2026-06-03T16:00:00Z",
-        linkedToType: "interaction",
-        linkedToId: "int-1"
-      },
-      {
-        id: "doc-2",
-        title: "Enterprise Architecture Core Schema Draft",
-        fileType: "Presentation",
-        fileSize: "4.8 MB",
-        uploadedAt: "2026-05-28T11:45:00Z",
-        linkedToType: "interaction",
-        linkedToId: "int-2"
-      },
-      {
-        id: "doc-3",
-        title: "Apex Solutions Umbrella NDA Signed File",
-        fileType: "Contract",
-        fileSize: "1.2 MB",
-        uploadedAt: "2026-05-15T10:00:00Z",
-        linkedToType: "entity",
-        linkedToId: "ent-1"
-      }
-    ];
-    const stmt = db.prepare("INSERT INTO documents (id, title, fileType, fileSize, uploadedAt, linkedToType, linkedToId) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    for (const d of seedDocs) {
-      stmt.run(d.id, d.title, d.fileType, d.fileSize, d.uploadedAt, d.linkedToType, d.linkedToId);
-    }
-  }
-
-  // Seed interactions
-  const countInts = db.prepare("SELECT count(*) as count FROM interactions").get() as { count: number };
-  if (countInts.count === 0) {
-    const seedInts = [
-      {
-        id: "int-1",
-        subject: "Q4 Marketing Alignment",
-        type: "Meeting",
-        assignee: "Sarah K.",
-        status: "IN PROGRESS",
-        client: "Apex Solutions Ltd.",
-        date: "2026-06-10",
-        summary: "Coordinate Q4 marketing plans, align team on upcoming milestones and core deliverables.",
-        tagIds: JSON.stringify(["tag-1", "tag-5"])
-      },
-      {
-        id: "int-2",
-        subject: "Enterprise Onboarding Sync",
-        type: "Review Session",
-        assignee: "Michael R.",
-        status: "COMPLETED",
-        client: "Stark Enterprises",
-        date: "2026-06-01",
-        summary: "Successfully reviewed initial corporate server schemas and staging project flow.",
-        tagIds: JSON.stringify(["tag-3"])
-      },
-      {
-        id: "int-3",
-        subject: "Apex Corp Introductory Meetup",
-        type: "Meeting",
-        assignee: "David J.",
-        status: "SCHEDULED",
-        client: "Apex Solutions Ltd.",
-        date: "2026-06-15",
-        summary: "Initial meeting with corporate stakeholders regarding project guidelines and expectations.",
-        tagIds: JSON.stringify(["tag-4"])
-      },
-      {
-        id: "int-4",
-        subject: "Project Review Steering Committee",
-        type: "Review Session",
-        assignee: "Sarah K.",
-        status: "BLOCKED",
-        client: "Stark Enterprises",
-        date: "2026-06-08",
-        summary: "Review milestones, risk metrics, and project resource assignments across teams.",
-        tagIds: JSON.stringify(["tag-1", "tag-2"])
-      }
-    ];
-    const stmt = db.prepare("INSERT INTO interactions (id, subject, type, assignee, status, client, date, summary, tagIds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    for (const i of seedInts) {
-      stmt.run(i.id, i.subject, i.type, i.assignee, i.status, i.client, i.date, i.summary, i.tagIds);
-    }
-  }
-
-  // Seed contacts
-  const countContacts = db.prepare("SELECT count(*) as count FROM contacts").get() as { count: number };
-  if (countContacts.count === 0) {
-    const seedContacts = [
-      {
-        id: "con-1",
-        name: "Julianne Apex",
-        role: "Stakeholder",
-        company: "Apex Solutions Ltd.",
-        email: "julianne.a@apex.io",
-        phone: "+1 (555) 234-5678"
-      },
-      {
-        id: "con-2",
-        name: "Marcus Miller",
-        role: "Lead Developer",
-        company: "Apex Solutions Ltd.",
-        email: "marcus.m@apex.io",
-        phone: "+1 (555) 876-5432"
-      },
-      {
-        id: "con-3",
-        name: "Sarah Jenkins",
-        role: "VP of Partnerships",
-        company: "Stark Enterprises",
-        email: "sarah.j@stark.com",
-        phone: "+1 (555) 432-1098"
-      },
-      {
-        id: "con-4",
-        name: "Michael Stark",
-        role: "Managing Director",
-        company: "Stark Enterprises",
-        email: "michael.r@stark.com",
-        phone: "+1 (555) 890-1234"
-      }
-    ];
-    const stmt = db.prepare("INSERT INTO contacts (id, name, role, company, email, phone) VALUES (?, ?, ?, ?, ?, ?)");
-    for (const c of seedContacts) {
-      stmt.run(c.id, c.name, c.role, c.company, c.email, c.phone);
-    }
-  }
-
-  // Seed entities
-  const countEntities = db.prepare("SELECT count(*) as count FROM entities").get() as { count: number };
-  if (countEntities.count === 0) {
-    const seedEntities = [
-      {
-        id: "ent-1",
-        name: "Apex Solutions Ltd.",
-        industry: "Financial Technology",
-        tier: "Strategic",
-        location: "London, UK"
-      },
-      {
-        id: "ent-2",
-        name: "Stark Enterprises",
-        industry: "Aerospace & Technology",
-        tier: "Enterprise",
-        location: "New York, USA"
-      },
-      {
-        id: "ent-3",
-        name: "Oscorp Corp",
-        industry: "Robotics & Sciences",
-        tier: "Key Account",
-        location: "Boston, USA"
-      }
-    ];
-    const stmt = db.prepare("INSERT INTO entities (id, name, industry, tier, location) VALUES (?, ?, ?, ?, ?)");
-    for (const e of seedEntities) {
-      stmt.run(e.id, e.name, e.industry, e.tier, e.location);
-    }
-  }
-
-  // Seed engagements
-  const countEngagements = db.prepare("SELECT count(*) as count FROM engagements").get() as { count: number };
-  if (countEngagements.count === 0) {
-    const seedEngagements = [
-      {
-        id: "eng-1",
-        title: "FinTech Acceleration SOW",
-        client: "Apex Solutions Ltd.",
-        type: "SOW Contract",
-        startDate: "2026-05-01",
-        endDate: "2026-11-01",
-        status: "Active",
-        description: "Implementation of custom server-side database sync layers and dashboard compliance features."
-      },
-      {
-        id: "eng-2",
-        title: "AeroTech Marketing Campaign",
-        client: "Stark Enterprises",
-        type: "Marketing Campaign",
-        startDate: "2026-06-01",
-        endDate: "2026-08-30",
-        status: "Under Negotiation",
-        description: "Launch promotion campaign for Stark new transport blueprint series."
-      },
-      {
-        id: "eng-3",
-        title: "Robotics Strategy Advisory",
-        client: "Oscorp Corp",
-        type: "Advisory Initiative",
-        startDate: "2026-07-01",
-        endDate: "2026-09-01",
-        status: "Pending Draft",
-        description: "Providing scientific advisor consultation regarding robotics safety protocols and alignment."
-      }
-    ];
-    const stmt = db.prepare("INSERT INTO engagements (id, title, client, type, startDate, endDate, status, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-    for (const g of seedEngagements) {
-      stmt.run(g.id, g.title, g.client, g.type, g.startDate, g.endDate, g.status, g.description);
-    }
-  }
+  // No prepopulated seed data requested for notes, documents, interactions, contacts, entities, and engagements.
 
   // DB Startup and Migration Integrity Analysis
   try {
@@ -804,6 +583,13 @@ async function startServer() {
   app.post("/api/users", (req, res) => {
     try {
       const { email, passwordHash, name, role, suspended } = req.body;
+      const requestRole = req.headers["x-user-role"] || "";
+
+      // Strict enforcement: Only Senior Analyst (Administrator) can register or assign the System Administrator role
+      if (role === "Senior Analyst" && requestRole !== "Senior Analyst") {
+        return res.status(403).json({ error: "Access Denied: Only a Senior Analyst can register or assign the System Administrator role." });
+      }
+
       db.prepare("INSERT OR REPLACE INTO users (email, passwordHash, name, role, suspended) VALUES (?, ?, ?, ?, ?)").run(email, passwordHash, name, role, suspended ?? 0);
       addAuditLog(req, "CREATE", "User", email, name, `Registered or re-created operator user with role: ${role}`);
       res.json({ success: true });
@@ -815,6 +601,13 @@ async function startServer() {
   app.put("/api/users", (req, res) => {
     try {
       const { email, passwordHash, name, role, suspended } = req.body;
+      const requestRole = req.headers["x-user-role"] || "";
+
+      // Strict enforcement: Only Senior Analyst can assign the System Administrator role
+      if (role === "Senior Analyst" && requestRole !== "Senior Analyst") {
+        return res.status(403).json({ error: "Access Denied: Only a Senior Analyst can assign the System Administrator role." });
+      }
+
       db.prepare("UPDATE users SET passwordHash = ?, name = ?, role = ?, suspended = ? WHERE email = ?").run(passwordHash, name, role, suspended ?? 0, email);
       addAuditLog(req, "UPDATE", "User", email, name, `Updated operator user profile, new role: ${role} (Suspended status: ${suspended ?? 0})`);
       res.json({ success: true });
@@ -844,6 +637,26 @@ async function startServer() {
       if (u) {
         db.prepare("UPDATE users SET suspended = 1 WHERE email = ?").run(req.params.email);
         addAuditLog(req, "DELETE", "User", req.params.email, u.name || req.params.email, `Soft-deleted / Suspended operator user`);
+        res.json({ success: true });
+      } else {
+        res.status(404).json({ error: "Operator not found" });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/users/:email/permanent", (req, res) => {
+    try {
+      const requestRole = req.headers["x-user-role"] || "";
+      if (requestRole !== "Senior Analyst") {
+        return res.status(403).json({ error: "Access Denied: Only a Senior Analyst can permanently remove users." });
+      }
+
+      const u = db.prepare("SELECT * FROM users WHERE email = ?").get(req.params.email) as any;
+      if (u) {
+        db.prepare("DELETE FROM users WHERE email = ?").run(req.params.email);
+        addAuditLog(req, "DELETE", "User", req.params.email, u.name || req.params.email, `Permanently removed auditor/operator account`);
         res.json({ success: true });
       } else {
         res.status(404).json({ error: "Operator not found" });
@@ -1299,6 +1112,7 @@ async function startServer() {
 
   // Vite development middleware vs Static Production files
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
