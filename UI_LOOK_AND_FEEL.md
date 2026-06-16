@@ -104,7 +104,13 @@ Renders critical Touchpoint pipelines inside 4 distinct lanes (`IN PROGRESS`, `S
 *   Centered card popups constructed with a dark header block. Uses custom clean dialog cards with sharp input outlines and bold action labels.
 *   Avoids raw browser dialog functions completely using a safe custom state-based React Modal layout.
 
-### 4.4 Settings & Preferences Console View
+### 4.4 Interdependency Gantt Style Specifications
+*   **Grid Sizing Bounds**: Core rows are `44px` high, and timeline columns are `36px` wide.
+*   **Left Sticky Subject Grid**: `280px` wide. Handled via CSS `position: sticky; left: 0; z-index: 40;` with an elegant scroll barrier border.
+*   **Unscheduled / Waiting Indicators**: Items without a scheduled date are styled with a left border tag (`border-l-3 border-dashed border-slate-300`) and a custom `WAITING` status badge: small `7px` bold mono letters inside a dashed gray capsule background.
+*   **Dependency Arc Vector Coordinates**: Drawn on an absolute SVG track using inline coordinates. Highlight states on row hover flip the connection line `stroke` to `#6366f1` and increase width to `2.5px`, adding instant dynamic analytics feel.
+
+### 4.5 Settings & Preferences Console View
 Features a detailed 2x2 modular matrix containing:
 1.  **Operator Profile Coordinates**: Displays static email keys and mutable custom Display Names synchronized under a single click save command.
 2.  **Passphrase Credentials Ajuster**: Form fields styled in monospace password masking allowing analysts to securely update seat passwords.

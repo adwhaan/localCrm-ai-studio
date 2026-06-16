@@ -47,17 +47,19 @@ export interface Interaction {
   subject: string;
   type: string;
   assignee: string;
-  status: "IN PROGRESS" | "COMPLETED" | "SCHEDULED" | "BLOCKED";
+  status: "IN PROGRESS" | "COMPLETED" | "SCHEDULED" | "BLOCKED" | "CANCELED";
   client: string; // Entity name
   date: string;
   summary: string;
   tagIds: string[];
   contactRoles?: Record<string, string>;
   Note?: string;
-  PrevInteraction?: number | null;
+  PrevInteraction?: string | number | null;
+  engagementId?: string | null;
   followUpDate?: string;
   followUpNotes?: string;
   followUpCompleted?: boolean;
+  duration?: number | null;
 }
 
 export interface Contact {
@@ -73,6 +75,7 @@ export interface Contact {
   Lastname?: string;
   LinkedInURL?: string;
   Ratting?: number;
+  updatedAt?: string;
 }
 
 export interface Entity {

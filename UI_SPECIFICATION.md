@@ -97,6 +97,51 @@ The application layout is divided into four structural areas designed with a des
 
 ---
 
+## 4. Interactions Touchpoint Subviews & Flow Visualizers
+
+When viewing the "Touchpoint Ledger" (Interaction Module), the page organizes the layout of content sections into three optional subviews, selectable via a top horizontal tab group (`subView === "list" | "board" | "gantt"`):
+
+### 4.1. High-Density Tabular List View
+*   **Grid Headings**: Interlocking cols: `[Checkbox Selection]`, `Subject & Summary`, `Assignee & Entity`, `Type Badge`, `Scheduled Date`, `Next Follow-up`.
+*   **Dynamic Actions**: Direct click trigger launches the side-drawer. Row selections pop up the Floating Batch Toolbar at the bottom center.
+
+### 4.2. Touchpoint Kanban Pipeline Board
+*   **Lanes Framework**: Four vertical columns matching `IN PROGRESS`, `SCHEDULED`, `COMPLETED`, `BLOCKED`.
+*   **Card Anatomy**: Border markers (emerald/blue/slate/rose) style the left edge of each tile. Unscheduled or "waiting" items are grouped with dashed indicators. Overdue tags blink as urgent warnings.
+
+### 4.3. Interdependency Gantt Sequence Chart (`InterdependencyGantt`)
+An advanced scheduling matrix that renders task sequences, timelines, and inter-relationship hooks:
+
+```
++---------------------------+-------------------------------------------------+
+| SUBJECT / USER PANEL      | TIMELINE SCROLL GRIDS                            |
+| (sticky left cell - 280px)| Month view (Days 1 to 28/30/31)                 |
++---------------------------+-------------------------------------------------+
+| Project Alignment         |                      [GitCommit Pill]           |
+| (isWaiting: false)        |                           |                     |
+|                           |                           | (Arc SVG Connector) |
+| Followup Email            |                           v                     |
+| (isWaiting: true / dashed)|                           O (Dashed Pill)       |
++---------------------------+-------------------------------------------------+
+```
+
+1.  **Dual Pane Splits**:
+    *   **Sticky Left Sidebar (`labelWidth: 280px`)**: Displays Subject, Client, and Assignee. If the item's `isWaiting` flag is true (the interaction lacks an explicit scheduled `date` but is waiting for a predecessor), a dashed gray border (`border-l-3 border-dashed border-slate-300`) and the tag `Projected` highlight its pending character.
+    *   **Horizontal Track Scroller (`colWidth: 36px` cells)**: Maps numerical columns for each calendar day of the month.
+2.  **State Classifications & Node Aesthetics**:
+    *   **Active / Scheduled Nodes**: Rendered as a solid-colored circular milestone box (`bg-status-500` - emerald/blue/amber/rose) containing a white `GitCommit` icon centered over the scheduled day column. This node launches the detail drawer upon a mouse click.
+    *   **Waiting / Projected Nodes**: Represented as a hollow circular badge with a dashed border (`bg-white border-2 border-dashed border-status-500`) and the respective text or indicator color. It maps to the predecessor's followUpDate, active date, or today to project the planned workflow timeline. Shows all interactions except **CANCELED**.
+3.  **SVC Connector Lines (Arc Drawing)**:
+    *   An overlapping SVG canvas (`pointer-events-none absolute left-0 top-0 w-full h-full`) maps absolute lines or arcs linking predecessor nodes.
+    *   **Formula**: Row heights are fixed (`rowHeight = 44px`), and column sizes are `36px`. Target coordinates:
+        *   `x1` = (Predecessor Day Column Index * Column Width) + Column Width (right edge edge)
+        *   `y1` = (Predecessor Row Index * Row Height) + Row Height / 2
+        *   `x2` = Successor Day Column Index * Column Width (left edge edge)
+        *   `y2` = (Successor Row Index * Row Height) + Row Height / 2
+    *   **Interactive Highlight Feedback**: Hovering or tracking any row highlights its respective SVG connecting curves in bright indigo (`stroke-[#6366f1]` with width of `2.5px`) and accents the text. Otherwise, static connections are styled as thin slate lines (`stroke-[#cbd5e1]` with width of `1.5px`) with clean arrow marker pointers.
+
+---
+
 ## 5. UI Elements & Core Component Styling
 
 ### 1. Unified Audit logs & Export to CSV

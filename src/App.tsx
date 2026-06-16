@@ -7,6 +7,7 @@ import { ContactsDashboard } from "./components/ContactsDashboard";
 import { EntitiesDashboard } from "./components/EntitiesDashboard";
 import { EntitiesMap } from "./components/EntitiesMap";
 import { InteractionsDashboard } from "./components/InteractionsDashboard";
+import { InterdependencyGantt } from "./components/InterdependencyGantt";
 import { EngagementsDashboard } from "./components/EngagementsDashboard";
 import {
   LayoutDashboard,
@@ -55,7 +56,11 @@ import {
   Download,
   CheckSquare,
   Settings,
-  AlertCircle
+  AlertCircle,
+  ArrowLeft,
+  ArrowRight,
+  Edit3,
+  ArrowUpDown
 } from "lucide-react";
 
 import {
@@ -208,6 +213,7 @@ export default function App() {
   const [conSearch, setConSearch] = useState("");
   const [conRatingFilter, setConRatingFilter] = useState<string>("ALL");
   const [conSortDir, setConSortDir] = useState<"asc" | "desc" | "none">("none");
+  const [conQuickSort, setConQuickSort] = useState<"none" | "name-asc" | "name-desc" | "modified-desc">("none");
 
   const [entSearch, setEntSearch] = useState("");
   const [entRatingFilter, setEntRatingFilter] = useState<string>("ALL");
@@ -221,7 +227,7 @@ export default function App() {
   // Dashboard / List Mode Toggles
   const [contactsViewMode, setContactsViewMode] = useState<"list" | "dashboard">("list");
   const [entitiesViewMode, setEntitiesViewMode] = useState<"list" | "dashboard" | "map">("list");
-  const [interactionsSubView, setInteractionsSubView] = useState<"list" | "dashboard">("list");
+  const [interactionsSubView, setInteractionsSubView] = useState<"list" | "gantt" | "dashboard">("list");
   const [engagementsViewMode, setEngagementsViewMode] = useState<"list" | "dashboard">("list");
 
   const [selectedItem, setSelectedItem] = useState<{
@@ -248,16 +254,18 @@ export default function App() {
   const [intForm, setIntForm] = useState({
     subject: "",
     type: "Meeting" as Interaction["type"],
-    assignee: SEED_CONTACTS[0]?.name || "",
+    assignee: "",
     status: "IN PROGRESS" as Interaction["status"],
     client: "",
     date: new Date().toISOString().split("T")[0],
     summary: "",
     Note: "",
     PrevInteraction: null as number | null,
+    engagementId: null as string | null,
     followUpDate: "",
     followUpNotes: "",
-    followUpCompleted: false
+    followUpCompleted: false,
+    duration: ""
   });
 
   const [contactForm, setContactForm] = useState({
@@ -312,12 +320,170 @@ export default function App() {
   const [interactionTimeRangeFilter, setInteractionTimeRangeFilter] = useState<string>("ALL");
   const [interactionStartDateFilter, setInteractionStartDateFilter] = useState<string>("");
   const [interactionEndDateFilter, setInteractionEndDateFilter] = useState<string>("");
+  const [interactionStatusFilters, setInteractionStatusFilters] = useState<Interaction["status"][]>(["IN PROGRESS", "SCHEDULED", "COMPLETED", "BLOCKED"]);
   const [interactionsViewMode, setInteractionsViewMode] = useState<"kanban" | "calendar">("kanban");
   const [calendarYear, setCalendarYear] = useState<number>(() => new Date().getFullYear());
   const [calendarMonth, setCalendarMonth] = useState<number>(() => new Date().getMonth()); // 0-indexed dynamically
   const [timelineFilterMode, setTimelineFilterMode] = useState<"Active" | "All">("Active");
   const [timelineZoom, setTimelineZoom] = useState<"Monthly" | "Quarterly" | "Annual">("Quarterly");
+  const [timelineOffsetDays, setTimelineOffsetDays] = useState<number>(0);
+  const [timelineRefDateStr, setTimelineRefDateStr] = useState<string>(() => {
+    const todayObj = new Date();
+    return `${todayObj.getFullYear()}-${String(todayObj.getMonth() + 1).padStart(2, "0")}-${String(todayObj.getDate()).padStart(2, "0")}`;
+  });
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);
+
+  // States for the Engagement Detail & Linked Interactions Sub-View
+  const [selectedEngagementForView, setSelectedEngagementForView] = useState<Engagement | null>(null);
+  const [subViewSearchQuery, setSubViewSearchQuery] = useState("");
+  const [subViewTypeFilter, setSubViewTypeFilter] = useState("ALL");
+  const [subViewStatusFilter, setSubViewStatusFilter] = useState("ALL");
+  const [subViewSortColumn, setSubViewSortColumn] = useState<"date" | "followUpDate">("date");
+  const [subViewSortDirection, setSubViewSortDirection] = useState<"asc" | "desc">("desc");
+
+  const centerTimelineOnDate = (dateStr: string, zoomValue?: "Monthly" | "Quarterly" | "Annual") => {
+    const refTime = new Date(dateStr).getTime();
+    const todayObj = new Date();
+    const tStr = `${todayObj.getFullYear()}-${String(todayObj.getMonth() + 1).padStart(2, "0")}-${String(todayObj.getDate()).padStart(2, "0")}`;
+    const todayDate = new Date(tStr);
+
+    const targetZoom = zoomValue || timelineZoom;
+    const oneDay = 24 * 60 * 60 * 1000;
+    let minTimeDefault = todayDate.getTime() - 45 * oneDay;
+    let maxTimeDefault = todayDate.getTime() + 180 * oneDay;
+
+    if (targetZoom === "Monthly") {
+      minTimeDefault = todayDate.getTime() - 20 * oneDay;
+      maxTimeDefault = todayDate.getTime() + 40 * oneDay;
+    } else if (targetZoom === "Quarterly") {
+      minTimeDefault = todayDate.getTime() - 60 * oneDay;
+      maxTimeDefault = todayDate.getTime() + 120 * oneDay;
+    } else if (targetZoom === "Annual") {
+      minTimeDefault = todayDate.getTime() - 150 * oneDay;
+      maxTimeDefault = todayDate.getTime() + 300 * oneDay;
+    }
+
+    const totalSpanDefault = maxTimeDefault - minTimeDefault;
+    const midTimeDefault = minTimeDefault + totalSpanDefault / 2;
+
+    const offsetDays = Math.round((refTime - midTimeDefault) / oneDay);
+    setTimelineOffsetDays(offsetDays);
+  };
+
+  // Calendar drag-and-hold auto-scroll/shift refs
+  const calendarGridRef = React.useRef<HTMLDivElement | null>(null);
+  const timelineGridRef = React.useRef<HTMLDivElement | null>(null);
+  const isDraggingInteractionRef = React.useRef<boolean>(false);
+  const activeEdgeRef = React.useRef<"left" | "right" | "top" | "bottom" | null>(null);
+  const calendarTimerRef = React.useRef<any>(null);
+
+  useEffect(() => {
+    const handleDragOver = (e: DragEvent) => {
+      if (!isDraggingInteractionRef.current || !calendarGridRef.current) return;
+      const rect = calendarGridRef.current.getBoundingClientRect();
+      const { clientX, clientY } = e;
+
+      let detectedEdge: "left" | "right" | "top" | "bottom" | null = null;
+
+      // Detect Left edge: horizontally left, vertically inside grid boundaries
+      if (
+        clientX >= rect.left - 30 &&
+        clientX <= rect.left + 45 &&
+        clientY >= rect.top - 20 &&
+        clientY <= rect.bottom + 20
+      ) {
+        detectedEdge = "left";
+      }
+      // Detect Right edge: horizontally right, vertically inside grid boundaries
+      else if (
+        clientX >= rect.right - 45 &&
+        clientX <= rect.right + 30 &&
+        clientY >= rect.top - 20 &&
+        clientY <= rect.bottom + 20
+      ) {
+        detectedEdge = "right";
+      }
+      // Detect Top edge: vertically top, horizontally inside grid boundaries
+      else if (
+        clientY >= rect.top - 30 &&
+        clientY <= rect.top + 45 &&
+        clientX >= rect.left - 20 &&
+        clientX <= rect.right + 20
+      ) {
+        detectedEdge = "top";
+      }
+      // Detect Bottom edge: vertically bottom, horizontally inside grid boundaries
+      else if (
+        clientY >= rect.bottom - 45 &&
+        clientY <= rect.bottom + 30 &&
+        clientX >= rect.left - 20 &&
+        clientX <= rect.right + 20
+      ) {
+        detectedEdge = "bottom";
+      }
+
+      if (detectedEdge !== activeEdgeRef.current) {
+        activeEdgeRef.current = detectedEdge;
+        if (calendarTimerRef.current) {
+          clearInterval(calendarTimerRef.current);
+          calendarTimerRef.current = null;
+        }
+
+        if (detectedEdge) {
+          const performShift = (edge: "left" | "right" | "top" | "bottom") => {
+            if (edge === "left") {
+              setCalendarMonth((prev) => {
+                if (prev === 0) {
+                  setCalendarYear((y) => y - 1);
+                  return 11;
+                }
+                return prev - 1;
+              });
+            } else if (edge === "right") {
+              setCalendarMonth((prev) => {
+                if (prev === 11) {
+                  setCalendarYear((y) => y + 1);
+                  return 0;
+                }
+                return prev + 1;
+              });
+            } else if (edge === "top") {
+              setCalendarYear((prev) => prev - 1);
+            } else if (edge === "bottom") {
+              setCalendarYear((prev) => prev + 1);
+            }
+          };
+
+          // Wait 1000ms holding near the edge before first shifting, then repeat every 1000ms
+          calendarTimerRef.current = setInterval(() => {
+            performShift(detectedEdge);
+          }, 1000);
+        }
+      }
+    };
+
+    const handleGlobalDragEnd = () => {
+      isDraggingInteractionRef.current = false;
+      activeEdgeRef.current = null;
+      if (calendarTimerRef.current) {
+        clearInterval(calendarTimerRef.current);
+        calendarTimerRef.current = null;
+      }
+    };
+
+    window.addEventListener("dragover", handleDragOver);
+    window.addEventListener("dragend", handleGlobalDragEnd);
+    window.addEventListener("drop", handleGlobalDragEnd);
+
+    return () => {
+      window.removeEventListener("dragover", handleDragOver);
+      window.removeEventListener("dragend", handleGlobalDragEnd);
+      window.removeEventListener("drop", handleGlobalDragEnd);
+      if (calendarTimerRef.current) {
+        clearInterval(calendarTimerRef.current);
+      }
+    };
+  }, []);
 
   // Custom System Confirm Modal State
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -372,7 +538,7 @@ export default function App() {
 
   const formAssigneeOptions = useMemo(() => {
     if (!intForm.client) {
-      return contacts;
+      return [];
     }
     return contacts.filter(
       (c) => (c.company || "").toLowerCase() === intForm.client.toLowerCase()
@@ -517,9 +683,14 @@ export default function App() {
         }
       }
 
+      // 3. Status filtering
+      if (!interactionStatusFilters.includes(item.status)) {
+        return false;
+      }
+
       return true;
     });
-  }, [interactions, interactionAssigneeFilter, interactionTimeRangeFilter, interactionStartDateFilter, interactionEndDateFilter]);
+  }, [interactions, interactionAssigneeFilter, interactionTimeRangeFilter, interactionStartDateFilter, interactionEndDateFilter, interactionStatusFilters]);
 
   // Auto-clear selection lists on tab activation changes
   useEffect(() => {
@@ -621,6 +792,78 @@ export default function App() {
     const combined = [...virtualNotifications, ...notifications];
     return combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [virtualNotifications, notifications]);
+
+  // Linked Interactions for the selected engagement sub-view
+  const linkedInteractions = useMemo(() => {
+    if (!selectedEngagementForView) return [];
+    
+    // Link by client name matching AND date within start/end dates
+    const matches = interactions.filter(interaction => {
+      if (interaction.engagementId) {
+        return interaction.engagementId === selectedEngagementForView.id;
+      }
+      const dateOk = !interaction.date || (
+        interaction.date >= selectedEngagementForView.startDate &&
+        interaction.date <= selectedEngagementForView.endDate
+      );
+      return interaction.client === selectedEngagementForView.client && dateOk;
+    });
+
+    return matches;
+  }, [interactions, selectedEngagementForView]);
+
+  // Filtered and sorted interactions for the sub-view
+  const filteredSubViewInteractions = useMemo(() => {
+    let list = [...linkedInteractions];
+
+    // 1. Text Search Filter
+    if (subViewSearchQuery.trim()) {
+      const query = subViewSearchQuery.toLowerCase();
+      list = list.filter(item => {
+        return (item.subject || "").toLowerCase().includes(query) ||
+               (item.summary || "").toLowerCase().includes(query) ||
+               (item.assignee || "").toLowerCase().includes(query) ||
+               (item.type || "").toLowerCase().includes(query) ||
+               (item.Note || "").toLowerCase().includes(query) ||
+               (item.followUpNotes || "").toLowerCase().includes(query);
+      });
+    }
+
+    // 2. Type Filter
+    if (subViewTypeFilter !== "ALL") {
+      const typeLower = subViewTypeFilter.toLowerCase();
+      list = list.filter(item => (item.type || "").toLowerCase() === typeLower);
+    }
+
+    // 3. Status Filter
+    if (subViewStatusFilter !== "ALL") {
+      const statusLower = subViewStatusFilter.toLowerCase();
+      list = list.filter(item => (item.status || "").toLowerCase() === statusLower);
+    }
+
+    // 4. Sorting on date columns
+    list.sort((a, b) => {
+      let dateA = "";
+      let dateB = "";
+
+      if (subViewSortColumn === "date") {
+        dateA = a.date || "";
+        dateB = b.date || "";
+      } else if (subViewSortColumn === "followUpDate") {
+        dateA = a.followUpDate || "";
+        dateB = b.followUpDate || "";
+      }
+
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+
+      const compare = dateA.localeCompare(dateB);
+      return subViewSortDirection === "asc" ? compare : -compare;
+    });
+
+    return list;
+  }, [linkedInteractions, subViewSearchQuery, subViewTypeFilter, subViewStatusFilter, subViewSortColumn, subViewSortDirection]);
 
   interface AuditLog {
     id: string;
@@ -1069,7 +1312,7 @@ export default function App() {
     );
   };
 
-  const handleBatchInteractionStatusUpdate = async (newStatus: "IN PROGRESS" | "SCHEDULED" | "COMPLETED" | "BLOCKED") => {
+  const handleBatchInteractionStatusUpdate = async (newStatus: "IN PROGRESS" | "SCHEDULED" | "COMPLETED" | "BLOCKED" | "CANCELED") => {
     if (selectedInteractionIds.length === 0) return;
     try {
       const res = await fetch("/api/interactions/batch-update-status", {
@@ -1078,13 +1321,17 @@ export default function App() {
         body: JSON.stringify({ ids: selectedInteractionIds, status: newStatus })
       });
       if (res.ok) {
-        setInteractions(prev => prev.map(i => {
+        const nextInteractions = interactions.map(i => {
           if (selectedInteractionIds.includes(i.id)) {
             return { ...i, status: newStatus };
           }
           return i;
-        }));
+        });
+        setInteractions(nextInteractions);
         showToast(`Updated ${selectedInteractionIds.length} interactions to ${newStatus}`, "success");
+        if (newStatus === "COMPLETED") {
+          await triggerCompletedDependencies(selectedInteractionIds, nextInteractions);
+        }
         setSelectedInteractionIds([]);
       } else {
         showToast("Failed to update status in batch", "error");
@@ -1357,7 +1604,9 @@ export default function App() {
       const newInt: Interaction = {
         id: `int-${Date.now()}`,
         ...intForm,
-        PrevInteraction: typeof intForm.PrevInteraction === 'number' ? intForm.PrevInteraction : null,
+        PrevInteraction: intForm.PrevInteraction || null,
+        engagementId: intForm.engagementId || null,
+        duration: intForm.duration ? parseInt(String(intForm.duration)) : null,
         tagIds: [],
         contactRoles: {},
         followUpDate: intForm.followUpDate || "",
@@ -1370,16 +1619,18 @@ export default function App() {
       setIntForm({
         subject: "",
         type: "Meeting",
-        assignee: contacts[0]?.name || SEED_CONTACTS[0]?.name || "",
+        assignee: "",
         status: "IN PROGRESS",
         client: "",
         date: new Date().toISOString().split("T")[0],
         summary: "",
         Note: "",
         PrevInteraction: null,
+        engagementId: null,
         followUpDate: "",
         followUpNotes: "",
-        followUpCompleted: false
+        followUpCompleted: false,
+        duration: ""
       });
     } else if (newType === "contact") {
       if (!contactForm.FirstName || !contactForm.company) {
@@ -1457,10 +1708,67 @@ export default function App() {
     setIsNewModalOpen(false);
   };
 
+  const triggerCompletedDependencies = async (completedIds: string[], currentInteractions: Interaction[]) => {
+    let listToUpdate = [...currentInteractions];
+    let updatedAny = false;
+    let activatedList: string[] = [];
+
+    let changedInLoop = true;
+    while (changedInLoop) {
+      changedInLoop = false;
+      listToUpdate = listToUpdate.map((item) => {
+        if (item.PrevInteraction) {
+          const dependencyIdStr = String(item.PrevInteraction);
+          // Find the predecessor interaction to check its follow-up date and status
+          const predecessor = listToUpdate.find(prev => 
+            prev.id === dependencyIdStr || 
+            String(prev.id.replace(/\D/g, '') || prev.id) === dependencyIdStr
+          );
+          const isPredecessorCompleted = completedIds.includes(dependencyIdStr) || 
+            (predecessor && predecessor.status === "COMPLETED");
+          
+          const needsActivation = isPredecessorCompleted && (!item.date || item.status === "SCHEDULED");
+          if (needsActivation) {
+            updatedAny = true;
+            changedInLoop = true;
+            activatedList.push(item.subject);
+            
+            // Choose between the predecessor's followUpDate or the current date fallback
+            const fallbackDate = new Date().toISOString().split("T")[0];
+            const activatedDate = item.date || (predecessor && predecessor.followUpDate ? predecessor.followUpDate : fallbackDate);
+
+            return {
+              ...item,
+              date: activatedDate,
+              status: "IN PROGRESS" as const
+            };
+          }
+        }
+        return item;
+      });
+    }
+
+    if (updatedAny) {
+      setInteractions(listToUpdate);
+      // Sync each modified dependent item to the server
+      for (const item of listToUpdate) {
+        const originalItem = currentInteractions.find(i => i.id === item.id);
+        if (originalItem && (originalItem.date !== item.date || originalItem.status !== item.status)) {
+          await syncToServer(`/api/interactions/${item.id}`, "PUT", item);
+        }
+      }
+      showToast(`Predecessor completed! Dependencies started: ${activatedList.join(", ")}`, "success");
+    }
+  };
+
   const handleUpdateItem = async (type: "interaction" | "contact" | "entity" | "engagement" | "user", payload: any) => {
     if (type === "interaction") {
       setInteractions((prev) => prev.map((item) => (item.id === payload.id ? payload : item)));
       await syncToServer(`/api/interactions/${payload.id}`, "PUT", payload);
+      if (payload.status === "COMPLETED") {
+        const latestInteractions = interactions.map(i => i.id === payload.id ? payload : i);
+        await triggerCompletedDependencies([payload.id], latestInteractions);
+      }
       await loadSQLiteState();
       showToast("Interaction briefing updated.", "success");
     } else if (type === "contact") {
@@ -1661,8 +1969,23 @@ export default function App() {
       });
     }
 
-    // Sort by rating
-    if (conSortDir !== "none") {
+    // Sort by rating or Quick Sort
+    if (conQuickSort !== "none") {
+      list.sort((a, b) => {
+        if (conQuickSort === "name-asc") {
+          return (a.name || "").localeCompare(b.name || "");
+        }
+        if (conQuickSort === "name-desc") {
+          return (b.name || "").localeCompare(a.name || "");
+        }
+        if (conQuickSort === "modified-desc") {
+          const tA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+          const tB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+          return tB - tA;
+        }
+        return 0;
+      });
+    } else if (conSortDir !== "none") {
       list.sort((a, b) => {
         const rA = a.Ratting !== undefined ? a.Ratting : (a.Rating !== undefined ? a.Rating : -1);
         const rB = b.Ratting !== undefined ? b.Ratting : (b.Rating !== undefined ? b.Rating : -1);
@@ -1671,7 +1994,7 @@ export default function App() {
     }
 
     return list;
-  }, [contacts, conSearch, conRatingFilter, conSortDir]);
+  }, [contacts, conSearch, conRatingFilter, conSortDir, conQuickSort]);
 
   const displayedEntities = useMemo(() => {
     let list = [...visibleEntities];
@@ -2117,6 +2440,13 @@ export default function App() {
           border: "border-l-4 border-l-blue-500",
           text: "SCHEDULED"
         };
+      case "CANCELED":
+        return {
+          bg: "bg-slate-100 border-slate-300 text-slate-500",
+          dot: "bg-slate-400",
+          border: "border-l-4 border-l-slate-400",
+          text: "CANCELED"
+        };
       default:
         return {
           bg: "bg-slate-50 border-slate-200 text-slate-500",
@@ -2187,12 +2517,6 @@ export default function App() {
 
               <div className="pt-2 border-t border-slate-800 text-center text-[11px] text-slate-500">
                 New user? <button type="button" onClick={() => setAuthScreen("signup")} className="text-blue-500 font-bold hover:underline">Register Profile</button>
-              </div>
-
-              <div className="p-3 bg-slate-950/40 border border-slate-800/40 rounded-lg text-center font-mono text-[9px] text-slate-500 space-y-1">
-                <span className="font-bold text-slate-400">Pre-Seeded Credentials (Password: password123):</span>
-                <p>admin@enterprise.com (System Admin)</p>
-                <p>david@enterprise.com (Senior Analyst)</p>
               </div>
             </form>
           )}
@@ -2661,7 +2985,7 @@ export default function App() {
                           setIntForm({
                             subject: "",
                             type: "Meeting",
-                            assignee: contacts[0]?.name || SEED_CONTACTS[0]?.name || "",
+                            assignee: "",
                             status: "IN PROGRESS",
                             client: "",
                             date: new Date().toISOString().split("T")[0],
@@ -2670,7 +2994,8 @@ export default function App() {
                             PrevInteraction: null,
                             followUpDate: "",
                             followUpNotes: "",
-                            followUpCompleted: false
+                            followUpCompleted: false,
+                            duration: ""
                           });
                           setIsNewModalOpen(true);
                           setIsQuickAccessOpen(false);
@@ -2955,6 +3280,11 @@ export default function App() {
                               <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border bg-slate-50 border-slate-200 text-slate-500">
                                 {item.type}
                               </span>
+                              {item.duration !== undefined && item.duration !== null && item.duration !== "" && (
+                                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border bg-indigo-50 border-indigo-200 text-indigo-605 flex items-center gap-1">
+                                  <Clock className="w-2.5 h-2.5" /> {item.duration} mins
+                                </span>
+                              )}
                             </div>
                             <span className="text-[10px] text-slate-400 font-mono">{item.date}</span>
                           </div>
@@ -3181,6 +3511,16 @@ export default function App() {
                       📋 Touchpoint Board
                     </button>
                     <button
+                      onClick={() => setInteractionsSubView("gantt")}
+                      className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                        interactionsSubView === "gantt"
+                          ? "bg-white text-slate-905 shadow-xs border border-slate-200/50"
+                          : "text-slate-550 hover:text-slate-955"
+                      }`}
+                    >
+                      ⏳ Interdependency Gantt
+                    </button>
+                    <button
                       onClick={() => setInteractionsSubView("dashboard")}
                       className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
                         interactionsSubView === "dashboard"
@@ -3330,6 +3670,69 @@ export default function App() {
                     />
                   </div>
                 </div>
+
+                {/* Filter 4: Interactive Status Filters */}
+                <div className="border-t border-slate-100 pt-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider font-mono block">
+                        Toggle Touchpoint Status Include/Exclude
+                      </label>
+                      <p className="text-[9.5px] text-slate-400 font-semibold leading-none mt-0.5">Click badges below to show/hide specific statuses in board and list views</p>
+                    </div>
+                    <div className="flex gap-2 text-[10px] h-5">
+                      <button
+                        type="button"
+                        onClick={() => setInteractionStatusFilters(["IN PROGRESS", "SCHEDULED", "COMPLETED", "BLOCKED", "CANCELED"])}
+                        className="font-bold text-blue-600 hover:text-blue-800 transition cursor-pointer"
+                      >
+                        Select All
+                      </button>
+                      <span className="text-slate-200">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setInteractionStatusFilters([])}
+                        className="font-bold text-blue-600 hover:text-blue-800 transition cursor-pointer"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2.5">
+                    {(["IN PROGRESS", "SCHEDULED", "COMPLETED", "BLOCKED", "CANCELED"] as const).map((status) => {
+                      const isSelected = interactionStatusFilters.includes(status);
+                      const classMap = {
+                        "IN PROGRESS": { active: "bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100/70", dot: "bg-amber-500", label: "In Progress" },
+                        "SCHEDULED": { active: "bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100/70", dot: "bg-blue-500", label: "Scheduled" },
+                        "COMPLETED": { active: "bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100/70", dot: "bg-emerald-500", label: "Completed" },
+                        "BLOCKED": { active: "bg-rose-50 border-rose-300 text-rose-700 hover:bg-rose-100/70", dot: "bg-rose-500", label: "Blocked" },
+                        "CANCELED": { active: "bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200/70", dot: "bg-slate-400", label: "Canceled" }
+                      }[status];
+
+                      return (
+                        <button
+                          key={status}
+                          type="button"
+                          onClick={() => {
+                            setInteractionStatusFilters(prev =>
+                              prev.includes(status)
+                                ? prev.filter(s => s !== status)
+                                : [...prev, status]
+                            );
+                          }}
+                          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border transition-all duration-150 cursor-pointer shadow-3xs ${
+                            isSelected
+                              ? `${classMap.active} ring-1 ring-slate-100`
+                              : "bg-slate-50 border-slate-200 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                          }`}
+                        >
+                          <span className={`w-2 h-2 rounded-full ring-2 ring-white ${isSelected ? classMap.dot : "bg-slate-300"}`} />
+                          {classMap.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
               {/* Batch Action Helper Header Control */}
@@ -3371,16 +3774,22 @@ export default function App() {
               </div>
 
               {interactionsViewMode === "kanban" ? (
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 animate-in fade-in duration-300">
+                <div 
+                  className="grid gap-6 animate-in fade-in duration-300"
+                  style={{
+                    gridTemplateColumns: `repeat(auto-fit, minmax(280px, 1fr))`
+                  }}
+                >
                   
                   {/* Column Generator */}
-                  {(["IN PROGRESS", "SCHEDULED", "COMPLETED", "BLOCKED"] as Interaction["status"][]).map((status) => {
+                  {interactionStatusFilters.map((status) => {
                     const items = filteredInteractions.filter((i) => i.status === status);
                     const statusColors = {
                       "IN PROGRESS": { border: "border-amber-200", bg: "bg-amber-500", text: "text-amber-700" },
                       "SCHEDULED": { border: "border-blue-200", bg: "bg-blue-600", text: "text-blue-700" },
                       "COMPLETED": { border: "border-emerald-200", bg: "bg-emerald-600", text: "text-emerald-700" },
-                      "BLOCKED": { border: "border-rose-200", bg: "bg-rose-500", text: "text-rose-700" }
+                      "BLOCKED": { border: "border-rose-200", bg: "bg-rose-500", text: "text-rose-700" },
+                      "CANCELED": { border: "border-slate-200", bg: "bg-slate-400", text: "text-slate-650" }
                     }[status];
 
                     return (
@@ -3443,7 +3852,45 @@ export default function App() {
                                     <span className="font-mono text-slate-400">{item.date}</span>
                                   </div>
                                   <h4 className="font-bold text-slate-900 text-xs mb-1 hover:text-blue-600 transition leading-snug">{item.subject}</h4>
-                                  <p className="text-[10px] text-slate-500 font-semibold">{item.client}</p>
+                                  <div className="flex justify-between items-center pb-1">
+                                    <p className="text-[10px] text-slate-500 font-semibold">{item.client}</p>
+                                    {item.duration !== undefined && item.duration !== null && item.duration !== "" && (
+                                      <span className="text-[8.5px] text-indigo-650 font-bold bg-indigo-50 border border-indigo-100 px-1 py-0.2 rounded font-mono flex items-center gap-0.5">
+                                        <Clock className="w-2.5 h-2.5 shrink-0" /> {item.duration}m
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Parent Engagement linkage on Kanban Card */}
+                                  {(() => {
+                                    const matchingEngs = engagements.filter(eng => {
+                                      if (item.engagementId) {
+                                        return eng.id === item.engagementId;
+                                      }
+                                      return eng.client === item.client && eng.startDate <= item.date && eng.endDate >= item.date;
+                                    });
+                                    if (matchingEngs.length === 0) return null;
+                                    return (
+                                      <div className="mt-1 pb-1.5 flex flex-wrap gap-1">
+                                        {matchingEngs.map((eng) => (
+                                          <button
+                                            key={eng.id}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setActiveTab("engagements");
+                                              setSelectedItem({ dataType: "engagement", data: eng });
+                                              setSelectedEngagementForView(eng);
+                                            }}
+                                            title={`Associated Engagement: ${eng.title}. Click to view details.`}
+                                            className="w-full text-left inline-flex items-center gap-1 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-750 border border-indigo-150/60 hover:border-indigo-250 px-1.5 py-0.5 rounded text-[8px] font-bold cursor-pointer transition max-w-full truncate"
+                                          >
+                                            <Briefcase className="w-2.5 h-2.5 text-indigo-500/80 shrink-0" />
+                                            <span className="truncate flex-1">Part of: {eng.title}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    );
+                                  })()}
 
                                   <div className="flex flex-wrap gap-1 mt-2 mb-3">
                                     {item.tagIds?.map((tId) => {
@@ -3554,7 +4001,7 @@ export default function App() {
                     const monthStartDateStr = `${calendarYear}-${String(calendarMonth + 1).padStart(2, "0")}-01`;
                     const monthEndDateStr = `${calendarYear}-${String(calendarMonth + 1).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
                     const monthActiveInteractions = filteredInteractions.filter(item => {
-                      return item.date >= monthStartDateStr && item.date <= monthEndDateStr;
+                      return item.status !== "CANCELED" && item.date >= monthStartDateStr && item.date <= monthEndDateStr;
                     });
                     const completedInMonth = monthActiveInteractions.filter(i => i.status === "COMPLETED").length;
                     const pendingInMonth = monthActiveInteractions.filter(i => i.status === "IN PROGRESS" || i.status === "SCHEDULED").length;
@@ -3648,7 +4095,7 @@ export default function App() {
                           </div>
 
                           {/* MONTH GRID CELLS SECTION */}
-                          <div className="grid grid-cols-7 gap-1 bg-slate-100/50 rounded-xl overflow-visible p-1">
+                          <div ref={calendarGridRef} className="grid grid-cols-7 gap-1 bg-slate-100/50 rounded-xl overflow-visible p-1">
                             {allCalendarDays.map((day, cellIndex) => {
                               const isCurrentMonth = day.monthType === "current";
                               const now = new Date();
@@ -3656,7 +4103,7 @@ export default function App() {
                               
                               // Format date as YYYY-MM-DD
                               const dateStr = `${day.year}-${String(day.month + 1).padStart(2, "0")}-${String(day.dayNum).padStart(2, "0")}`;
-                              const dayInteractions = filteredInteractions.filter(i => i.date === dateStr);
+                              const dayInteractions = filteredInteractions.filter(i => i.date === dateStr && i.status !== "CANCELED");
 
                               return (
                                 <div
@@ -3723,6 +4170,7 @@ export default function App() {
                                     {dayInteractions.map((item) => {
                                       const isSelected = selectedInteractionIds.includes(item.id);
                                       const cardStatus = getStatusClasses(item.status);
+                                      const isInProgress = item.status === "IN PROGRESS";
                                       const intNotes = visibleNotes.filter((n) => n.linkedToType === "interaction" && n.linkedToId === item.id);
                                       const intDocs = visibleDocuments.filter((d) => d.linkedToType === "interaction" && d.linkedToId === item.id);
 
@@ -3743,6 +4191,10 @@ export default function App() {
                                           onDragStart={(e) => {
                                             e.dataTransfer.setData("text/plain", item.id);
                                             e.dataTransfer.effectAllowed = "move";
+                                            isDraggingInteractionRef.current = true;
+                                          }}
+                                          onDragEnd={() => {
+                                            isDraggingInteractionRef.current = false;
                                           }}
                                           onClick={(e) => {
                                             e.stopPropagation();
@@ -3752,10 +4204,15 @@ export default function App() {
                                           {/* Item Pill */}
                                           <div className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold cursor-pointer border flex items-center justify-between gap-1 transition-all hover:scale-[1.02] shadow-[0_1px_2px_rgba(0,0,0,0.03)] select-none ${
                                             isSelected 
-                                              ? "bg-blue-100 border-blue-400 text-blue-800" 
-                                              : `${cardStatus.bg} ${cardStatus.border} hover:border-slate-450`
+                                              ? "bg-blue-100 border-blue-400 text-blue-800 border-solid" 
+                                              : `${cardStatus.bg} ${cardStatus.border} hover:border-slate-450 ${
+                                                  isInProgress ? "border-solid opacity-100" : "border-dotted border-slate-300 opacity-70"
+                                                }`
                                           }`}>
-                                            <span className="truncate flex-1 leading-snug">{item.subject}</span>
+                                            <span className="truncate flex-1 leading-snug flex items-center gap-1.5">
+                                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${cardStatus.dot}`} />
+                                              <span className="truncate">{item.subject}</span>
+                                            </span>
                                             <input
                                               type="checkbox"
                                               checked={isSelected}
@@ -3788,6 +4245,9 @@ export default function App() {
                                                 <p className="text-slate-400 font-semibold">Client • <span className="font-extrabold text-white">{item.client}</span></p>
                                                 <p className="text-slate-400 font-semibold">Assignee • <span className="font-extrabold text-slate-300">{item.assignee}</span></p>
                                                 <p className="text-slate-400 font-semibold">Scheduled Date • <span className="font-bold text-sky-405 font-mono">{item.date}</span></p>
+                                                {item.duration !== undefined && item.duration !== null && item.duration !== "" && (
+                                                  <p className="text-slate-400 font-semibold">Duration • <span className="font-bold text-indigo-400 font-mono">{item.duration} mins</span></p>
+                                                )}
                                               </div>
 
                                               {item.summary && (
@@ -3832,6 +4292,36 @@ export default function App() {
                                         </div>
                                       );
                                     })}
+
+                                    {/* Active matching Engagements on this day */}
+                                    {(() => {
+                                      const dayEngagements = engagements.filter(eng => {
+                                        const isWithinTime = eng.startDate <= dateStr && eng.endDate >= dateStr;
+                                        if (!isWithinTime) return false;
+                                        return dayInteractions.some(i => i.engagementId ? i.engagementId === eng.id : i.client === eng.client);
+                                      });
+                                      if (dayEngagements.length === 0) return null;
+                                      return (
+                                        <div className="pt-1 mt-1 border-t border-slate-100 flex flex-col gap-1">
+                                          {dayEngagements.map((eng) => (
+                                            <button
+                                              key={eng.id}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setActiveTab("engagements");
+                                                setSelectedItem({ dataType: "engagement", data: eng });
+                                                setSelectedEngagementForView(eng);
+                                              }}
+                                              title={`Associated Engagement: ${eng.title}. Click to view details.`}
+                                              className="w-full text-left bg-indigo-50/70 hover:bg-indigo-100 border border-indigo-150/50 hover:border-indigo-250 rounded px-1.5 py-0.5 text-[8px] font-bold text-indigo-700 truncate flex items-center gap-1 transition duration-150 cursor-pointer pointer-events-auto shrink-0 animate-in fade-in duration-200"
+                                            >
+                                              <Briefcase className="w-2.5 h-2.5 text-indigo-500/70 shrink-0 select-none" />
+                                              <span className="truncate flex-1">Eng: {eng.title}</span>
+                                            </button>
+                                          ))}
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
 
                                   {/* Quick add prompt helper inside cell */}
@@ -3860,6 +4350,17 @@ export default function App() {
                 </div>
               )}
             </div>
+          ) : interactionsSubView === "gantt" ? (
+            <InterdependencyGantt
+              interactions={interactions}
+              filteredInteractions={filteredInteractions}
+              tags={tags}
+              onSelectInteraction={(item) => setSelectedItem({ dataType: "interaction", data: item })}
+              calendarMonth={calendarMonth}
+              calendarYear={calendarYear}
+              setCalendarMonth={setCalendarMonth}
+              setCalendarYear={setCalendarYear}
+            />
           ) : (
             <InteractionsDashboard
               interactions={interactions}
@@ -3999,12 +4500,28 @@ export default function App() {
                     </select>
                   </div>
 
-                  {(conSearch || conRatingFilter !== "ALL" || conSortDir !== "none") && (
+                  {/* Quick Sort */}
+                  <div className="w-full sm:w-auto flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0">Quick Sort:</span>
+                    <select
+                      value={conQuickSort}
+                      onChange={(e) => setConQuickSort(e.target.value as any)}
+                      className="w-full sm:w-auto border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-705 bg-slate-50 cursor-pointer"
+                    >
+                      <option value="none">Default Order</option>
+                      <option value="name-asc">Name: A to Z</option>
+                      <option value="name-desc">Name: Z to A</option>
+                      <option value="modified-desc">Most Recently Modified</option>
+                    </select>
+                  </div>
+
+                  {(conSearch || conRatingFilter !== "ALL" || conSortDir !== "none" || conQuickSort !== "none") && (
                     <button
                       onClick={() => {
                         setConSearch("");
                         setConRatingFilter("ALL");
                         setConSortDir("none");
+                        setConQuickSort("none");
                       }}
                       className="text-xs font-bold text-rose-600 hover:text-rose-700 hover:underline shrink-0 cursor-pointer"
                     >
@@ -4430,7 +4947,407 @@ export default function App() {
           {/* TAB 5: CORPORATE ENGAGEMENTS LISTING */}
           {activeTab === "engagements" && (
             <div className="space-y-6 animate-in fade-in duration-300">
-              <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-slate-200 pb-3">
+              {selectedEngagementForView ? (
+                <div className="space-y-6 animate-in fade-in duration-300" id="engagement-detail-subview">
+                  {/* Title breadcrumb & header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 text-xs text-slate-500 font-extrabold font-mono uppercase tracking-wider select-none">
+                        <button 
+                          onClick={() => setSelectedEngagementForView(null)}
+                          className="hover:text-indigo-650 transition flex items-center gap-1 cursor-pointer font-bold duration-150"
+                        >
+                          Corporate Engagements
+                        </button>
+                        <ChevronRight className="w-3 h-3 text-slate-450" />
+                        <span className="text-slate-800 font-extrabold">Engagement Detail</span>
+                      </div>
+                      <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                        <Handshake className="w-5.5 h-5.5 text-sky-500 shrink-0" />
+                        <span>{selectedEngagementForView.title}</span>
+                      </h2>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setSelectedEngagementForView(null)}
+                        className="px-3.5 py-1.5 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-lg text-xs font-bold border border-slate-250 shadow-xs transition duration-150 cursor-pointer flex items-center gap-1"
+                      >
+                        <ArrowLeft className="w-3.5 h-3.5" /> Back to SOW list
+                      </button>
+                      <button
+                        onClick={() => setSelectedItem({ dataType: "engagement", data: selectedEngagementForView })}
+                        className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-950 text-white rounded-lg text-xs font-bold shadow-xs transition duration-150 cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Edit3 className="w-3.5 h-3.5 text-slate-300" /> Edit Engagement
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* SOW Overview Dashboard summary */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* SOW Profile Card (Clickable to edit SOW spec in drawer) */}
+                    <div 
+                      onClick={() => setSelectedItem({ dataType: "engagement", data: selectedEngagementForView })}
+                      className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 lg:col-span-1 cursor-pointer hover:border-slate-400 hover:shadow-md transition-all duration-250 group/spec-card relative"
+                      title="Click to view/edit SOW specifications"
+                    >
+                      <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
+                        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">Engagement Specification</h4>
+                        <span className="text-[9px] text-indigo-600 bg-indigo-50 border border-indigo-100/60 px-1.5 py-0.5 rounded font-bold group-hover/spec-card:bg-indigo-600 group-hover/spec-card:text-white transition-all font-mono">
+                          ✏️ Edit Spec
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-3.5">
+                        <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-100 font-sans">
+                          <div>
+                            <span className="text-[9px] text-slate-400 font-bold uppercase block">Corporate Client</span>
+                            <span className="text-xs font-bold text-slate-900">{selectedEngagementForView.client}</span>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-[8px] font-extrabold uppercase border ${
+                            {
+                              "Active": "bg-emerald-50 text-emerald-700 border-emerald-100",
+                              "Under Negotiation": "bg-amber-50 text-amber-700 border-amber-100",
+                              "Pending Draft": "bg-blue-50 text-blue-700 border-blue-100",
+                              "Closed": "bg-slate-100 text-slate-500 border-slate-200"
+                            }[selectedEngagementForView.status] || "bg-slate-50 text-slate-600 border-slate-200"
+                          }`}>
+                            {selectedEngagementForView.status}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 text-xs leading-none">
+                          <div className="bg-slate-50 p-3 rounded-lg border border-slate-100/50">
+                            <span className="text-[8px] text-slate-400 font-bold uppercase block mb-1">Agreement Type</span>
+                            <strong className="text-slate-800">{selectedEngagementForView.type}</strong>
+                          </div>
+                          <div className="bg-slate-50 p-3 rounded-lg border border-slate-100/50">
+                            <span className="text-[8px] text-slate-400 font-bold uppercase block mb-1">Total Touchpoints</span>
+                            <strong className="text-slate-800 font-mono text-[13px]">{linkedInteractions.length} Logs</strong>
+                          </div>
+                        </div>
+
+                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100/50 space-y-2">
+                          <span className="text-[8px] text-slate-400 font-bold uppercase block leading-none">SOW Duration Range</span>
+                          <div className="flex items-center gap-1.5 text-xs text-slate-800 font-mono">
+                            <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+                            <strong>{selectedEngagementForView.startDate}</strong>
+                            <span className="text-slate-450 font-sans font-medium">to</span>
+                            <strong>{selectedEngagementForView.endDate}</strong>
+                          </div>
+                          {(() => {
+                            const start = new Date(selectedEngagementForView.startDate).getTime();
+                            const end = new Date(selectedEngagementForView.endDate).getTime();
+                            const today = new Date().getTime();
+                            let percent = 0;
+                            if (today > start) {
+                              if (today >= end) percent = 100;
+                              else percent = Math.round(((today - start) / (end - start)) * 100);
+                            }
+                            return (
+                              <div className="space-y-1 pt-1.5">
+                                <div className="flex justify-between items-center text-[9px] font-bold text-slate-400 font-sans">
+                                  <span>Time Elapsed</span>
+                                  <span>{percent}%</span>
+                                </div>
+                                <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                  <div className="h-full bg-indigo-505 rounded-full" style={{ width: `${percent}%`, backgroundColor: "#6366f1" }} />
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <span className="text-[8px] text-slate-400 font-bold uppercase block font-mono">Scope Statement</span>
+                          <p className="bg-slate-50/50 border border-slate-200 rounded-xl p-3.5 text-xs italic text-slate-700 leading-relaxed font-serif whitespace-normal">
+                            "{selectedEngagementForView.description || "No description provided for SOW scope of work."}"
+                          </p>
+                        </div>
+
+                        {selectedEngagementForView.tagIds && selectedEngagementForView.tagIds.length > 0 && (
+                          <div className="flex flex-wrap gap-1 pt-2">
+                            {selectedEngagementForView.tagIds.map((tId) => {
+                              const activeTag = tags.find((t) => t.id === tId);
+                              if (!activeTag) return null;
+                              return (
+                                <span key={tId} className={`px-2 py-0.5 rounded text-[8.5px] font-bold uppercase tracking-wider border ${getColorClasses(activeTag.color)}`}>
+                                  #{activeTag.name}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Linked Interactions Main Table and Filter controls */}
+                    <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2">
+                        <div className="space-y-1">
+                          <h3 className="font-extrabold text-slate-900 text-sm tracking-tight flex items-center gap-1.5">
+                            <Clock className="w-4 h-4 text-sky-500" />
+                            <span>Linked Interactions Registry</span>
+                          </h3>
+                          <p className="text-[10px] text-slate-400">Showing touchpoint records mapped within client SOW parameters</p>
+                        </div>
+                        <div className="flex items-center gap-1.5 font-mono text-[9px] text-slate-500 bg-slate-50 px-2.5 py-1 rounded-xl border border-slate-150 shadow-inner">
+                          <span>📊 Matches:</span>
+                          <strong className="text-slate-900">{filteredSubViewInteractions.length} of {linkedInteractions.length}</strong>
+                        </div>
+                      </div>
+
+                      {/* Filters and Sorting Toolbar */}
+                      <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-inner">
+                        <div className="flex flex-wrap items-center gap-2 flex-1">
+                          {/* Search Bar */}
+                          <div className="relative flex-1 min-w-[160px] md:max-w-xs">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 font-semibold" />
+                            <input
+                              type="text"
+                              placeholder="Search linked logs..."
+                              value={subViewSearchQuery}
+                              onChange={(e) => setSubViewSearchQuery(e.target.value)}
+                              className="w-full bg-white border border-slate-250 rounded-lg pl-8 pr-3 py-1 text-xs outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 shadow-3xs text-slate-755 font-semibold placeholder:text-slate-400"
+                            />
+                            {subViewSearchQuery && (
+                              <button
+                                onClick={() => setSubViewSearchQuery("")}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-605 text-[10px] font-bold cursor-pointer"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Type filter */}
+                          <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200 shadow-3xs shrink-0 select-none">
+                            <span className="text-[8px] font-bold font-mono text-slate-400 px-1.5">TYPE:</span>
+                            <select
+                              value={subViewTypeFilter}
+                              onChange={(e) => setSubViewTypeFilter(e.target.value)}
+                              className="bg-transparent border-0 py-0.5 px-1.5 text-[10.5px] font-bold text-slate-750 outline-none cursor-pointer"
+                            >
+                              <option value="ALL">ALL INTERACTION TYPES</option>
+                              <option value="EMAIL">EMAIL</option>
+                              <option value="MEETING">MEETING</option>
+                              <option value="CALL">CALL</option>
+                              <option value="OTHER">OTHER</option>
+                            </select>
+                          </div>
+
+                          {/* Status filter */}
+                          <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200 shadow-3xs shrink-0 select-none">
+                            <span className="text-[8px] font-bold font-mono text-slate-400 px-1.5">STATUS:</span>
+                            <select
+                              value={subViewStatusFilter}
+                              onChange={(e) => setSubViewStatusFilter(e.target.value)}
+                              className="bg-transparent border-0 py-0.5 px-1.5 text-[10.5px] font-bold text-slate-755 outline-none cursor-pointer"
+                            >
+                              <option value="ALL">ALL STATUSES</option>
+                              <option value="COMPLETED">COMPLETED</option>
+                              <option value="IN PROGRESS">IN PROGRESS</option>
+                              <option value="SCHEDULED">SCHEDULED</option>
+                              <option value="BLOCKED">BLOCKED</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Sorting Column Selector explicitly as helper button if table columns aren't clicked */}
+                        <div className="flex items-center gap-1.5 bg-white p-1 rounded-lg border border-slate-200 shadow-3xs shrink-0 text-xs font-semibold">
+                          <span className="text-[8.5px] font-bold font-mono text-slate-400">SORT BY:</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                if (subViewSortColumn === "date") {
+                                  setSubViewSortDirection(prev => prev === "asc" ? "desc" : "asc");
+                                } else {
+                                  setSubViewSortColumn("date");
+                                  setSubViewSortDirection("desc");
+                                }
+                              }}
+                              className={`px-2 py-0.5 rounded text-[9.5px] font-bold transition duration-150 cursor-pointer ${
+                                subViewSortColumn === "date"
+                                  ? "bg-slate-900 text-white shadow-xs"
+                                  : "text-slate-500 hover:text-slate-800"
+                              }`}
+                            >
+                              Touchpoint Date {subViewSortColumn === "date" && (subViewSortDirection === "asc" ? "↑" : "↓")}
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (subViewSortColumn === "followUpDate") {
+                                  setSubViewSortDirection(prev => prev === "asc" ? "desc" : "asc");
+                                } else {
+                                  setSubViewSortColumn("followUpDate");
+                                  setSubViewSortDirection("desc");
+                                }
+                              }}
+                              className={`px-2 py-0.5 rounded text-[9.5px] font-bold transition duration-150 cursor-pointer ${
+                                subViewSortColumn === "followUpDate"
+                                  ? "bg-slate-900 text-white shadow-xs"
+                                  : "text-slate-500 hover:text-slate-800"
+                              }`}
+                            >
+                              Follow-up Date {subViewSortColumn === "followUpDate" && (subViewSortDirection === "asc" ? "↑" : "↓")}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Table / Cards of interactions */}
+                      <div className="overflow-x-auto min-w-0 border border-slate-200 rounded-xl shadow-3xs bg-white">
+                        <table className="min-w-full divide-y divide-slate-150">
+                          <thead className="bg-slate-50 font-mono text-[9px] font-bold text-slate-450 uppercase tracking-widest select-none">
+                            <tr>
+                              {/* Sortable Header Date */}
+                              <th 
+                                scope="col" 
+                                onClick={() => {
+                                  if (subViewSortColumn === "date") {
+                                    setSubViewSortDirection(prev => prev === "asc" ? "desc" : "asc");
+                                  } else {
+                                    setSubViewSortColumn("date");
+                                    setSubViewSortDirection("desc");
+                                  }
+                                }}
+                                className="px-5 py-3 text-left font-black cursor-pointer hover:bg-slate-100 hover:text-indigo-650 transition duration-155 group"
+                              >
+                                <div className="flex items-center gap-1">
+                                  <span>Interaction Date</span>
+                                  <ArrowUpDown className={`w-3 h-3 group-hover:opacity-100 ${
+                                    subViewSortColumn === "date" ? "text-indigo-650 opacity-100" : "text-slate-400 opacity-60"
+                                  }`} />
+                                </div>
+                              </th>
+                              <th scope="col" className="px-5 py-3 text-left">Subject / Highlights</th>
+                              <th scope="col" className="px-5 py-3 text-left">Manner/Type</th>
+                              <th scope="col" className="px-5 py-3 text-left">Lifecycle status</th>
+                              <th scope="col" className="px-5 py-3 text-left">Owner / Assignee</th>
+                              {/* Sortable Header Follow-up Date */}
+                              <th 
+                                scope="col" 
+                                onClick={() => {
+                                  if (subViewSortColumn === "followUpDate") {
+                                    setSubViewSortDirection(prev => prev === "asc" ? "desc" : "asc");
+                                  } else {
+                                    setSubViewSortColumn("followUpDate");
+                                    setSubViewSortDirection("desc");
+                                  }
+                                }}
+                                className="px-5 py-3 text-left font-black cursor-pointer hover:bg-slate-100 hover:text-indigo-650 transition duration-155 group"
+                              >
+                                <div className="flex items-center gap-1">
+                                  <span>Follow-up Plan</span>
+                                  <ArrowUpDown className={`w-3 h-3 group-hover:opacity-100 ${
+                                    subViewSortColumn === "followUpDate" ? "text-indigo-650 opacity-100" : "text-slate-400 opacity-60"
+                                  }`} />
+                                </div>
+                              </th>
+                              <th scope="col" className="px-5 py-3 text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-150 text-slate-800 text-xs font-semibold">
+                            {filteredSubViewInteractions.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="text-center py-10 text-slate-400 italic bg-slate-50/50">
+                                  {linkedInteractions.length === 0 
+                                    ? "No interactions matched this SOW's client company, or they lie outside the agreement range."
+                                    : "No linked interactions found matching your current filters."
+                                  }
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredSubViewInteractions.map((item) => {
+                                const statusMap = {
+                                  "IN PROGRESS": "bg-blue-50 text-blue-700 border-blue-200",
+                                  "COMPLETED": "bg-emerald-50 text-emerald-700 border-emerald-250",
+                                  "SCHEDULED": "bg-slate-100 text-slate-700 border-slate-350",
+                                  "BLOCKED": "bg-rose-50 text-rose-700 border-rose-250"
+                                }[item.status] || "bg-slate-50 text-slate-650";
+
+                                const statusColors = {
+                                  "IN PROGRESS": {
+                                    rowBg: "hover:bg-indigo-50/10 bg-indigo-50/5",
+                                    borderL: "border-l-4 border-l-indigo-600"
+                                  },
+                                  "COMPLETED": {
+                                    rowBg: "hover:bg-emerald-50/25 bg-emerald-50/10",
+                                    borderL: "border-l-4 border-l-emerald-500"
+                                  },
+                                  "SCHEDULED": {
+                                    rowBg: "hover:bg-slate-50 bg-white",
+                                    borderL: "border-l-4 border-l-slate-400"
+                                  },
+                                  "BLOCKED": {
+                                    rowBg: "hover:bg-rose-50/20 bg-rose-50/5",
+                                    borderL: "border-l-4 border-l-rose-500"
+                                  }
+                                }[item.status] || {
+                                  rowBg: "hover:bg-slate-50 bg-white",
+                                  borderL: ""
+                                };
+
+                                return (
+                                  <tr 
+                                    key={item.id}
+                                    onClick={() => setSelectedItem({ dataType: "interaction", data: item })}
+                                    className={`${statusColors.rowBg} cursor-pointer transition duration-150 group/row`}
+                                  >
+                                    <td className={`px-5 py-4 whitespace-nowrap font-mono text-slate-550 text-[11px] group-hover/row:text-slate-900 transition ${statusColors.borderL}`}>
+                                      {item.date || "Pending Predecessor"}
+                                    </td>
+                                    <td className="px-5 py-4 max-w-xs">
+                                      <span className="font-extrabold text-slate-900 block truncate group-hover/row:text-indigo-650 transition">{item.subject}</span>
+                                      <span className="text-[10px] text-slate-450 block truncate mt-0.5 italic">"{item.summary || 'No overview loaded.'}"</span>
+                                    </td>
+                                    <td className="px-5 py-4 whitespace-nowrap">
+                                      <span className="px-2 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 rounded text-[9px] font-extrabold uppercase font-mono tracking-wider">
+                                        {item.type}
+                                      </span>
+                                    </td>
+                                    <td className="px-5 py-4 whitespace-nowrap">
+                                      <span className={`px-2 py-0.5 border rounded text-[9px] font-bold uppercase ${statusMap}`}>
+                                        {item.status}
+                                      </span>
+                                    </td>
+                                    <td className="px-5 py-4 whitespace-nowrap text-slate-600">
+                                      👤 {item.assignee}
+                                    </td>
+                                    <td className="px-5 py-4 whitespace-nowrap font-medium">
+                                      {item.followUpDate ? (
+                                        <div className="space-y-0.5">
+                                          <span className="font-mono text-indigo-650 font-bold text-[10.5px] block">📅 {item.followUpDate}</span>
+                                          {item.followUpNotes && <span className="text-[9.5px] text-slate-400 truncate block max-w-[120px]" title={item.followUpNotes}>{item.followUpNotes}</span>}
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-350 italic text-[10.5px]">None mapped</span>
+                                      )}
+                                    </td>
+                                    <td className="px-5 py-4 text-right whitespace-nowrap">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedItem({ dataType: "interaction", data: item });
+                                        }}
+                                        className="text-sky-600 hover:text-sky-850 font-bold hover:underline py-1 px-2.5 rounded-lg border border-transparent hover:border-sky-150 hover:bg-sky-50 transition duration-150"
+                                      >
+                                        Inspect →
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-slate-200 pb-3">
                 <div>
                   <h2 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
                     <Handshake className="w-5 h-5 text-sky-500" /> Corporate Engagements
@@ -4504,8 +5421,14 @@ export default function App() {
                   maxTime = todayDate.getTime() + 300 * oneDay; // 300 days out
                 }
 
+                // Apply timeline horizontal scroll offset
+                minTime += timelineOffsetDays * oneDay;
+                maxTime += timelineOffsetDays * oneDay;
+
                 const totalSpan = maxTime - minTime;
                 const todayPercent = ((todayDate.getTime() - minTime) / totalSpan) * 100;
+                const refDateObj = new Date(timelineRefDateStr);
+                const refPercent = ((refDateObj.getTime() - minTime) / totalSpan) * 100;
 
                 // Month tick calculations (Month start and mid-month)
                 const startYearMonth = new Date(minTime);
@@ -4559,9 +5482,9 @@ export default function App() {
                       </div>
 
                       {/* Controls container containing both filter options and zoom factors */}
-                      <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+                      <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto overflow-x-auto lg:overflow-visible py-1 lg:py-0">
                         {/* Scope Filter */}
-                        <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-xl border border-slate-200 shadow-inner">
+                        <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-xl border border-slate-200 shadow-inner shrink-0">
                           <span className="text-[9px] text-slate-500 font-bold uppercase font-mono tracking-wider">Scope:</span>
                           <div className="flex items-center bg-white p-0.5 rounded-lg border border-slate-200 shadow-sm">
                             <button
@@ -4587,12 +5510,31 @@ export default function App() {
                           </div>
                         </div>
 
+                        {/* Focus/Reference Date Selector */}
+                        <div className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1 rounded-xl border border-slate-200 shadow-inner shrink-0">
+                          <span className="text-[9px] text-slate-500 font-bold uppercase font-mono tracking-wider flex items-center gap-1 select-none">
+                            <Calendar className="w-3 h-3 text-sky-500" /> Focus Date:
+                          </span>
+                          <input
+                            type="date"
+                            value={timelineRefDateStr}
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                setTimelineRefDateStr(e.target.value);
+                                // Center timeline view on the newly selected focus date using the helper function
+                                centerTimelineOnDate(e.target.value);
+                              }
+                            }}
+                            className="bg-white px-2 py-0.5 text-[10.5px] font-mono font-bold rounded-lg border border-slate-200 text-slate-700 focus:outline-none focus:ring-1 focus:ring-sky-500 shadow-xs cursor-pointer"
+                          />
+                        </div>
+
                         {/* Zoom Scale */}
-                        <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-xl border border-slate-200 shadow-inner col-span-2">
+                        <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-xl border border-slate-200 shadow-inner shrink-0">
                           <span className="text-[9px] text-slate-500 font-bold uppercase font-mono tracking-wider">Scale:</span>
                           <div className="flex items-center bg-white p-0.5 rounded-lg border border-slate-200 shadow-sm">
                             <button
-                              onClick={() => setTimelineZoom("Monthly")}
+                              onClick={() => { setTimelineZoom("Monthly"); setTimelineOffsetDays(0); }}
                               className={`px-2.5 py-1 rounded text-[10.5px] font-bold transition-all duration-200 ${
                                 timelineZoom === "Monthly"
                                   ? "bg-slate-900 text-white shadow-sm"
@@ -4602,7 +5544,7 @@ export default function App() {
                               Monthly
                             </button>
                             <button
-                              onClick={() => setTimelineZoom("Quarterly")}
+                              onClick={() => { setTimelineZoom("Quarterly"); setTimelineOffsetDays(0); }}
                               className={`px-2.5 py-1 rounded text-[10.5px] font-bold transition-all duration-200 ${
                                 timelineZoom === "Quarterly"
                                   ? "bg-slate-900 text-white shadow-sm"
@@ -4612,7 +5554,7 @@ export default function App() {
                               Quarterly
                             </button>
                             <button
-                              onClick={() => setTimelineZoom("Annual")}
+                              onClick={() => { setTimelineZoom("Annual"); setTimelineOffsetDays(0); }}
                               className={`px-2.5 py-1 rounded text-[10.5px] font-bold transition-all duration-200 ${
                                 timelineZoom === "Annual"
                                   ? "bg-slate-900 text-white shadow-sm"
@@ -4623,13 +5565,77 @@ export default function App() {
                             </button>
                           </div>
                         </div>
+
+                        {/* Scroll Timeline */}
+                        <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-xl border border-slate-200 shadow-inner shrink-0">
+                          <span className="text-[9px] text-slate-500 font-bold uppercase font-mono tracking-wider">Scroll:</span>
+                          <div className="flex items-center bg-white p-0.5 rounded-lg border border-slate-200 shadow-sm gap-0.5">
+                            <button
+                              onClick={() => {
+                                const step = timelineZoom === "Monthly" ? 15 : timelineZoom === "Quarterly" ? 30 : 90;
+                                setTimelineOffsetDays((prev) => prev - step);
+                              }}
+                              title="Scroll Backwards"
+                              className="p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-900 cursor-pointer transition flex items-center justify-center border border-transparent hover:border-slate-200"
+                            >
+                              <ChevronLeft className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setTimelineOffsetDays(0);
+                                const tObj = new Date();
+                                const tStr = `${tObj.getFullYear()}-${String(tObj.getMonth() + 1).padStart(2, "0")}-${String(tObj.getDate()).padStart(2, "0")}`;
+                                setTimelineRefDateStr(tStr);
+                              }}
+                              disabled={timelineOffsetDays === 0 && timelineRefDateStr === todayStr}
+                              title="Reset Focus and Scroll to Present (Today)"
+                              className={`px-2 py-1 rounded text-[9.5px] font-bold transition uppercase font-mono border border-transparent ${
+                                (timelineOffsetDays === 0 && timelineRefDateStr === todayStr)
+                                  ? "text-slate-300 cursor-not-allowed"
+                                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100 cursor-pointer hover:border-slate-200"
+                                }`}
+                            >
+                              Today
+                            </button>
+                            <button
+                              onClick={() => {
+                                const step = timelineZoom === "Monthly" ? 15 : timelineZoom === "Quarterly" ? 30 : 90;
+                                setTimelineOffsetDays((prev) => prev + step);
+                              }}
+                              title="Scroll Forwards"
+                              className="p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-900 cursor-pointer transition flex items-center justify-center border border-transparent hover:border-slate-200"
+                            >
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
                     {/* Timeline visualization canvas container */}
                     <div className="relative border border-slate-200 bg-white rounded-xl p-4 overflow-x-auto min-w-0 shadow-inner">
                       {/* Grid representation */}
-                      <div className="relative min-w-[700px] select-none py-1.5 overflow-visible">
+                      <div 
+                        ref={timelineGridRef}
+                        onClick={(e) => {
+                          // Allow setting the focus date by clicking any empty space on the timeline canvas
+                          const isRow = (e.target as HTMLElement).closest('.group\\/timeline-row');
+                          const isPin = (e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('.pointer-events-auto');
+                          if (!isRow && !isPin && timelineGridRef.current) {
+                            const rect = timelineGridRef.current.getBoundingClientRect();
+                            const clickX = e.clientX - rect.left;
+                            const computedPercent = (clickX / rect.width) * 100;
+                            if (computedPercent >= 0 && computedPercent <= 100) {
+                              const clickedTime = minTime + (computedPercent / 100) * totalSpan;
+                              const cDate = new Date(clickedTime);
+                              const clickedDateStr = `${cDate.getFullYear()}-${String(cDate.getMonth() + 1).padStart(2, "0")}-${String(cDate.getDate()).padStart(2, "0")}`;
+                              setTimelineRefDateStr(clickedDateStr);
+                              centerTimelineOnDate(clickedDateStr);
+                            }
+                          }
+                        }}
+                        className="relative min-w-[700px] select-none py-1.5 overflow-visible cursor-crosshair"
+                      >
                         
                         {/* Month Vertical Grid Indicators & Labels */}
                         <div className="h-5 relative mb-4 border-b border-slate-100 overflow-visible text-slate-400 text-[9px] font-bold font-mono">
@@ -4662,16 +5668,67 @@ export default function App() {
                           ))}
                         </div>
 
-                        {/* TODAY CURRENT DATE VERTICAL INDICATOR LINE */}
+                        {/* SUBTLE TODAY'S ACTUAL DATE REFERENCE INDICATOR */}
                         {todayPercent >= 0 && todayPercent <= 100 && (
                           <div 
-                            className="absolute bottom-0 top-6 w-0.5 pointer-events-none z-30 transition-all duration-350 overflow-visible"
+                            className="absolute bottom-0 top-6 w-px pointer-events-none z-20 transition-all duration-350 overflow-visible"
                             style={{ left: `${todayPercent}%` }}
                           >
-                            <div className="absolute -top-6 -translate-x-1/2 bg-red-600 text-white font-black text-[7.5px] px-1.5 py-0.5 rounded uppercase tracking-wider shadow whitespace-nowrap">
-                              Today <span className="font-mono">(Jun 7)</span>
+                            <div className="absolute top-1 -translate-x-1/2 bg-slate-100/90 border border-slate-200 text-slate-500 font-semibold text-[7px] px-1.5 py-0.2 rounded font-sans shadow-2xs">
+                              Today ({todayDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })})
                             </div>
-                            <div className="h-full w-[2px] bg-red-500" />
+                            <div className="h-full w-px border-l border-dashed border-slate-300" />
+                          </div>
+                        )}
+
+                        {/* TARGET / SELECTED FOCUS DATE VERTICAL INDICATOR LINE (THE RED PIN) */}
+                        {refPercent >= 0 && refPercent <= 100 ? (
+                          <div 
+                            className="absolute bottom-0 top-6 w-0.5 pointer-events-none z-30 transition-all duration-350 overflow-visible"
+                            style={{ left: `${refPercent}%` }}
+                          >
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                centerTimelineOnDate(timelineRefDateStr);
+                              }}
+                              title="Focus date indicator. Click to center of timeline span."
+                              className="absolute -top-6 -translate-x-1/2 bg-red-650 hover:bg-red-750 text-white font-black text-[7.5px] px-2 py-0.5 rounded shadow pointer-events-auto flex items-center gap-1 transition duration-150 cursor-pointer uppercase tracking-wider border-0 focus:outline-none"
+                            >
+                              <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping shrink-0" />
+                              Focus: <span className="font-mono text-red-100 font-bold">{refDateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                            </button>
+                            <div className="h-full w-[2px] bg-red-650 shadow-xs" />
+                          </div>
+                        ) : refPercent < 0 ? (
+                          <div 
+                            className="absolute bottom-0 top-6 w-px z-30 transition-all duration-350 overflow-visible"
+                            style={{ left: `0%` }}
+                          >
+                            <button
+                              onClick={() => centerTimelineOnDate(timelineRefDateStr)}
+                              title={`Focus Date is left of research range. Click to center view on ${refDateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" })}.`}
+                              className="absolute -top-6 left-0 bg-red-650 hover:bg-red-750 text-white font-black text-[7.5px] px-1.5 py-0.5 rounded uppercase tracking-wider shadow whitespace-nowrap flex items-center gap-1 transition duration-155 cursor-pointer pointer-events-auto hover:scale-105 active:scale-95 border-0 focus:outline-none"
+                            >
+                              <ChevronLeft className="w-2.5 h-2.5 animate-pulse shrink-0 font-bold text-red-100" />
+                              Focus: <span className="font-mono text-red-100 font-bold">{refDateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                            </button>
+                            <div className="h-full w-px border-l border-dashed border-red-500" />
+                          </div>
+                        ) : (
+                          <div 
+                            className="absolute bottom-0 top-6 w-px z-30 transition-all duration-350 overflow-visible"
+                            style={{ left: `100%` }}
+                          >
+                            <button
+                              onClick={() => centerTimelineOnDate(timelineRefDateStr)}
+                              title={`Focus Date is right of research range. Click to center view on ${refDateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" })}.`}
+                              className="absolute -top-6 right-0 translate-x-1/3 bg-red-650 hover:bg-red-750 text-white font-black text-[7.5px] px-1.5 py-0.5 rounded uppercase tracking-wider shadow whitespace-nowrap flex items-center gap-1 transition duration-155 cursor-pointer pointer-events-auto hover:scale-105 active:scale-95 border-0 focus:outline-none"
+                            >
+                              Focus: <span className="font-mono text-red-100 font-bold">{refDateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                              <ChevronRight className="w-2.5 h-2.5 animate-pulse shrink-0 font-bold text-red-100" />
+                            </button>
+                            <div className="h-full w-px border-r border-dashed border-red-500" />
                           </div>
                         )}
 
@@ -4734,7 +5791,9 @@ export default function App() {
                                   <div 
                                     key={eng.id}
                                     className="relative group/timeline-row"
-                                    onClick={() => setSelectedItem({ dataType: "engagement", data: eng })}
+                                    onClick={() => {
+                                      setSelectedEngagementForView(eng);
+                                    }}
                                   >
                                     {/* Visual Bar Track */}
                                     <div 
@@ -4870,7 +5929,9 @@ export default function App() {
                   return (
                     <div
                       key={eng.id}
-                      onClick={() => setSelectedItem({ dataType: "engagement", data: eng })}
+                      onClick={() => {
+                        setSelectedEngagementForView(eng);
+                      }}
                       className={`bg-white border border-slate-200 border-l-4 ${cardBorderLeftColor} rounded-xl p-5 hover:border-sky-450 cursor-pointer shadow-sm hover:shadow-md transition duration-200 flex flex-col justify-between`}
                     >
                       <div className="space-y-3.5">
@@ -4969,6 +6030,8 @@ export default function App() {
                 showToast={showToast}
               />
             )}
+                </>
+              )}
           </div>
         )}
 
@@ -6548,7 +7611,7 @@ export default function App() {
                 {searchResults.engagements.length === 0 ? <p className="text-xs text-slate-400 italic">No matches</p> : (
                   <div className="space-y-1">
                     {searchResults.engagements.map((g) => (
-                      <div key={g.id} onClick={() => { setSelectedItem({ dataType: "engagement", data: g }); setIsSearchActive(false); setSearchQuery(""); }} className="p-2 hover:bg-slate-50 border border-transparent hover:border-slate-100 rounded-lg cursor-pointer">
+                      <div key={g.id} onClick={() => { setSelectedItem({ dataType: "engagement", data: g }); setSelectedEngagementForView(g); setActiveTab("engagements"); setIsSearchActive(false); setSearchQuery(""); }} className="p-2 hover:bg-slate-50 border border-transparent hover:border-slate-100 rounded-lg cursor-pointer">
                         <p className="font-semibold text-xs text-slate-900">{highlightText(g.title, searchQuery)}</p>
                         <p className="text-[10px] text-slate-500">{highlightText(g.type, searchQuery)} &bull; {highlightText(g.client, searchQuery)}</p>
                       </div>
@@ -6602,18 +7665,11 @@ export default function App() {
                       />
                     </div>
                     <div>
-                      <label className="block text-slate-500 font-bold mb-1">Target Date</label>
-                      <input type="date" required value={intForm.date} onChange={(e) => setIntForm({ ...intForm, date: e.target.value })} className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none animate-in fade-in" />
+                      <label className="block text-slate-500 font-bold mb-1">Target Date {intForm.PrevInteraction ? "(Optional - Auto-calculated)" : ""}</label>
+                      <input type="date" required={!intForm.PrevInteraction} value={intForm.date} onChange={(e) => setIntForm({ ...intForm, date: e.target.value })} className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none animate-in fade-in" />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-slate-500 font-bold mb-1">Assignee</label>
-                      <select value={intForm.assignee} onChange={(e) => setIntForm({ ...intForm, assignee: e.target.value })} className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none text-slate-705">
-                        <option value="">-- Choose Assignee --</option>
-                        {formAssigneeOptions.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-                      </select>
-                    </div>
                     <div>
                       <label className="block text-slate-500 font-bold mb-1">Corporate Client</label>
                       <select
@@ -6622,7 +7678,7 @@ export default function App() {
                           const nextClient = e.target.value;
                           const nextAssignees = nextClient 
                             ? contacts.filter((c) => (c.company || "").toLowerCase() === nextClient.toLowerCase())
-                            : contacts;
+                            : [];
                           const isCurrentAssigneeValid = nextAssignees.some((c) => c.name === intForm.assignee);
                           const nextAssignee = isCurrentAssigneeValid 
                             ? intForm.assignee 
@@ -6631,8 +7687,32 @@ export default function App() {
                         }}
                         className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none text-slate-705"
                       >
-                        <option value="">-- Choose Account --</option>
+                        <option value="">-- Choose Corporate Client --</option>
                         {entities.map((e) => <option key={e.id} value={e.name}>{e.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-500 font-bold mb-1">Assignee</label>
+                      <select 
+                        value={intForm.assignee} 
+                        onChange={(e) => setIntForm({ ...intForm, assignee: e.target.value })} 
+                        className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none text-slate-705 disabled:opacity-50 transition-all"
+                        disabled={!intForm.client}
+                      >
+                        {intForm.client ? (
+                          <>
+                            {formAssigneeOptions.length > 0 ? (
+                              <>
+                                <option value="">-- Choose Assignee --</option>
+                                {formAssigneeOptions.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                              </>
+                            ) : (
+                              <option value="">-- No contacts for this Client --</option>
+                            )}
+                          </>
+                        ) : (
+                          <option value="">-- Choose Corporate Client First --</option>
+                        )}
                       </select>
                     </div>
                   </div>
@@ -6644,11 +7724,76 @@ export default function App() {
                     <label className="block text-slate-500 font-bold mb-1">Operational Note</label>
                     <textarea rows={2} value={intForm.Note} onChange={(e) => setIntForm({ ...intForm, Note: e.target.value })} className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none" placeholder="Initial operational details..." />
                   </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-500 font-bold mb-1">Touchpoint Status</label>
+                      <select
+                        value={intForm.status}
+                        onChange={(e) => setIntForm({ ...intForm, status: e.target.value as any })}
+                        className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none text-slate-705 font-semibold"
+                      >
+                        <option value="IN PROGRESS">IN PROGRESS</option>
+                        <option value="SCHEDULED">SCHEDULED</option>
+                        <option value="COMPLETED">COMPLETED</option>
+                        <option value="BLOCKED">BLOCKED</option>
+                        <option value="CANCELED">CANCELED</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-500 font-bold mb-1">Duration (minutes)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="e.g. 45"
+                        value={intForm.duration}
+                        onChange={(e) => setIntForm({ ...intForm, duration: e.target.value })}
+                        className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none text-slate-705 font-mono"
+                      />
+                    </div>
+                  </div>
                   <div>
                     <label className="block text-slate-500 font-bold mb-1">Previous Interaction Link</label>
-                    <select value={intForm.PrevInteraction || ""} onChange={(e) => setIntForm({ ...intForm, PrevInteraction: e.target.value ? parseInt(e.target.value) : null })} className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none text-xs">
-                      <option value="">-- No Previous Interaction --</option>
-                      {interactions.map((i) => <option key={i.id} value={i.id.replace(/\D/g, '') || i.id}>{i.subject} ({i.date})</option>)}
+                    <select value={intForm.PrevInteraction || ""} onChange={(e) => setIntForm({ ...intForm, PrevInteraction: e.target.value || null })} className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none text-xs text-slate-705">
+                        <option value="">-- No Previous Interaction --</option>
+                        {interactions.map((i) => <option key={i.id} value={i.id}>{i.subject} ({i.date || "Pending Predecessor"})</option>)}
+                      </select>
+                    </div>
+
+                  <div>
+                    <label className="block text-slate-500 font-bold mb-1">Linked Engagement (SOW)</label>
+                    <select
+                      value={intForm.engagementId || ""}
+                      onChange={(e) => {
+                        const engId = e.target.value || null;
+                        const selectedEng = engagements.find((eg) => eg.id === engId);
+                        if (selectedEng) {
+                          const nextClient = selectedEng.client;
+                          const nextAssignees = contacts.filter((c) => (c.company || "").toLowerCase() === nextClient.toLowerCase());
+                          const isCurrentAssigneeValid = nextAssignees.some((c) => c.name === intForm.assignee);
+                          const nextAssignee = isCurrentAssigneeValid ? intForm.assignee : (nextAssignees[0]?.name || "");
+                          setIntForm({
+                            ...intForm,
+                            engagementId: engId,
+                            client: nextClient,
+                            assignee: nextAssignee
+                          });
+                        } else {
+                          setIntForm({
+                            ...intForm,
+                            engagementId: null
+                          });
+                        }
+                      }}
+                      className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none text-slate-705 font-medium"
+                    >
+                      <option value="">-- No Direct Engagement Link (Optional) --</option>
+                      {engagements
+                        .filter((eng) => !intForm.client || eng.client === intForm.client)
+                        .map((eng) => (
+                          <option key={eng.id} value={eng.id}>
+                            [{eng.client}] {eng.title}
+                          </option>
+                        ))}
                     </select>
                   </div>
                   
@@ -6885,7 +8030,31 @@ export default function App() {
                     </div>
                     <div>
                       <label className="block text-slate-505 font-bold mb-1">Term Completion</label>
-                      <input type="date" required value={engagementForm.endDate} onChange={(e) => setEngagementForm({ ...engagementForm, endDate: e.target.value })} className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none" />
+                      <input 
+                        type="date" 
+                        required 
+                        disabled={engagementForm.endDate === "2035-12-31"}
+                        value={engagementForm.endDate} 
+                        onChange={(e) => setEngagementForm({ ...engagementForm, endDate: e.target.value })} 
+                        className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none disabled:opacity-50" 
+                      />
+                    </div>
+                    <div className="col-span-2 pt-1 flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="ongoing-engagement-checkbox"
+                        checked={engagementForm.endDate === "2035-12-31"}
+                        onChange={(e) => {
+                          setEngagementForm({
+                            ...engagementForm,
+                            endDate: e.target.checked ? "2035-12-31" : new Date().toISOString().split("T")[0]
+                          });
+                        }}
+                        className="w-4 h-4 cursor-pointer rounded border-slate-350 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <label htmlFor="ongoing-engagement-checkbox" className="text-xs font-semibold text-slate-600 cursor-pointer select-none">
+                        Ongoing / Continuous Initiative (No fixed end date, uses far-away 2035-12-31)
+                      </label>
                     </div>
                   </div>
                   <div>
@@ -7011,6 +8180,7 @@ export default function App() {
                           <option value="SCHEDULED">SCHEDULED</option>
                           <option value="COMPLETED">COMPLETED</option>
                           <option value="BLOCKED">BLOCKED</option>
+                          <option value="CANCELED">CANCELED</option>
                         </select>
                       </div>
                     </div>
@@ -7033,22 +8203,106 @@ export default function App() {
                         placeholder="Additional workspace note..."
                       />
                     </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Scheduled Target Date {selectedItem.data.PrevInteraction ? "(Optional)" : ""}</label>
+                        <input
+                          type="date"
+                          value={selectedItem.data.date || ""}
+                          onChange={(e) => setSelectedItem({ ...selectedItem, data: { ...selectedItem.data, date: e.target.value } })}
+                          className="w-full bg-slate-50 border p-2.5 rounded-lg font-semibold text-slate-705 outline-none font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Duration (minutes)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="e.g. 45"
+                          value={selectedItem.data.duration || ""}
+                          onChange={(e) => setSelectedItem({ ...selectedItem, data: { ...selectedItem.data, duration: e.target.value ? parseInt(e.target.value) : null } })}
+                          className="w-full bg-slate-50 border p-2.5 rounded-lg font-semibold text-slate-705 outline-none font-mono"
+                        />
+                      </div>
+                    </div>
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Previous Linked Touchpoint</label>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Previous Linked Touchpoint / Dependency</label>
                       <select
                         value={selectedItem.data.PrevInteraction || ""}
-                        onChange={(e) => setSelectedItem({ ...selectedItem, data: { ...selectedItem.data, PrevInteraction: e.target.value ? parseInt(e.target.value) : null } })}
-                        className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg outline-none text-xs"
+                        onChange={(e) => setSelectedItem({ ...selectedItem, data: { ...selectedItem.data, PrevInteraction: e.target.value ? e.target.value : null } })}
+                        className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg outline-none text-xs text-slate-705"
                       >
-                        <option value="">No Linked Previous Interaction</option>
+                        <option value="">-- No Dependency (Independent Interaction) --</option>
                         {interactions
                           .filter((i) => i.id !== selectedItem.data.id)
                           .map((i) => (
                             <option key={i.id} value={i.id.replace(/\D/g, '') || i.id}>
-                              {i.subject} ({i.date})
+                              {i.subject} ({i.date || "Pending Predecessor"})
                             </option>
                           ))}
                       </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Corporate Client</label>
+                        <select
+                          value={selectedItem.data.client || ""}
+                          onChange={(e) => {
+                            const nextClient = e.target.value;
+                            const currentEng = engagements.find(eg => eg.id === selectedItem.data.engagementId);
+                            const updatedEngagementId = currentEng && currentEng.client === nextClient 
+                              ? selectedItem.data.engagementId 
+                              : null;
+
+                            setSelectedItem({
+                              ...selectedItem,
+                              data: {
+                                ...selectedItem.data,
+                                client: nextClient,
+                                engagementId: updatedEngagementId
+                              }
+                            });
+                          }}
+                          className="w-full bg-slate-50 border p-2.5 rounded-lg font-semibold text-slate-700"
+                        >
+                          <option value="">-- Choose Corporate Client --</option>
+                          {entities.map((ent) => (
+                            <option key={ent.id} value={ent.name}>
+                              {ent.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Associated SOW Engagement</label>
+                        <select
+                          value={selectedItem.data.engagementId || ""}
+                          onChange={(e) => {
+                            const nextEngId = e.target.value || null;
+                            const targetEng = engagements.find(eg => eg.id === nextEngId);
+                            setSelectedItem({
+                              ...selectedItem,
+                              data: {
+                                ...selectedItem.data,
+                                engagementId: nextEngId,
+                                client: targetEng ? targetEng.client : selectedItem.data.client
+                              }
+                            });
+                          }}
+                          className="w-full bg-slate-50 border p-2.5 rounded-lg font-semibold text-slate-700"
+                        >
+                          <option value="">-- No Engagement Link (Optional) --</option>
+                          {engagements
+                            .filter(eng => !selectedItem.data.client || eng.client === selectedItem.data.client)
+                            .map((eng) => (
+                              <option key={eng.id} value={eng.id}>
+                                [{eng.client}] {eng.title}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
                     </div>
                     
                     {/* Next Follow Up Tracker */}
@@ -7387,10 +8641,31 @@ export default function App() {
                         <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Termination Term</label>
                         <input
                           type="date"
+                          disabled={selectedItem.data.endDate === "2035-12-31"}
                           value={selectedItem.data.endDate}
                           onChange={(e) => setSelectedItem({ ...selectedItem, data: { ...selectedItem.data, endDate: e.target.value } })}
-                          className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none text-slate-700 font-mono"
+                          className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none text-slate-700 font-mono disabled:opacity-50"
                         />
+                      </div>
+                      <div className="col-span-2 pt-1 flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="edit-ongoing-engagement-checkbox"
+                          checked={selectedItem.data.endDate === "2035-12-31"}
+                          onChange={(e) => {
+                            setSelectedItem({
+                              ...selectedItem,
+                              data: {
+                                ...selectedItem.data,
+                                endDate: e.target.checked ? "2035-12-31" : new Date().toISOString().split("T")[0]
+                              }
+                            });
+                          }}
+                          className="w-4 h-4 cursor-pointer rounded border-slate-350 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <label htmlFor="edit-ongoing-engagement-checkbox" className="text-xs font-semibold text-slate-600 cursor-pointer select-none">
+                          Ongoing / Continuous Initiative (No fixed end date, uses far-away 2035-12-31)
+                        </label>
                       </div>
                     </div>
                     <div>
@@ -8030,7 +9305,7 @@ export default function App() {
             {activeTab === "interactions" && (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider font-mono mr-1">Update Status:</span>
-                {(["IN PROGRESS", "SCHEDULED", "COMPLETED", "BLOCKED"] as any[]).map((st) => (
+                {(["IN PROGRESS", "SCHEDULED", "COMPLETED", "BLOCKED", "CANCELED"] as any[]).map((st) => (
                   <button
                     key={st}
                     onClick={() => handleBatchInteractionStatusUpdate(st)}

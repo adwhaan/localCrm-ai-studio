@@ -106,8 +106,9 @@ A quick overview of key files and directories:
 *   `/server.ts`: Full Express backend structure, schema updates, REST controllers, and WS sockets.
 *   `/src/main.tsx`: Entry point for React.
 *   `/src/App.tsx`: Central frontend portal orchestrating theme managers, dashboard grids, Kanban pipelines, slide drawers, forms, and dialog overlays.
-*   `/src/types.ts`: TypeScript data interfaces.
-*   `/UI_SPECIFICATION.md`: Original visual standards.
-*   `/UI_LOOK_AND_FEEL.md`: Visual styling guidelines for themes and heights.
-*   `/DATA_MODEL.md`: SQLite database tables and schema specifications.
+*   `/types.ts`: TypeScript data interfaces.
+*   `/UI_SPECIFICATION.md`: Original visual standards representing high density and high contrast panels.
+*   `/UI_LOOK_AND_FEEL.md`: Visual styling guidelines for themes, grids, and Gantt tracking bars.
+*   `/DATA_MODEL.md`: SQLite database tables, relational schemas, and migration triggers.
+*   `/USER_STORIES.md`: User journeys, persona matrices, sequence cascades, and operational stories.
 *   `/SYSTEM_OVERVIEW.md`: High-level system architecture and roles directory (this file).
