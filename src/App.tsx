@@ -4360,6 +4360,7 @@ export default function App() {
               calendarYear={calendarYear}
               setCalendarMonth={setCalendarMonth}
               setCalendarYear={setCalendarYear}
+              engagements={engagements}
             />
           ) : (
             <InteractionsDashboard

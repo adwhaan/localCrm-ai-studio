@@ -12,7 +12,7 @@ import {
   Eye,
   Briefcase
 } from "lucide-react";
-import { Interaction } from "../types";
+import { Interaction, Engagement } from "../types";
 
 interface CustomTag {
   id: string;
@@ -29,6 +29,7 @@ interface InterdependencyGanttProps {
   calendarYear: number;
   setCalendarMonth: (m: number) => void;
   setCalendarYear: (y: number) => void;
+  engagements?: Engagement[];
 }
 
 const MONTH_NAMES = [
@@ -45,6 +46,7 @@ export const InterdependencyGantt: React.FC<InterdependencyGanttProps> = ({
   calendarYear,
   setCalendarMonth,
   setCalendarYear,
+  engagements = []
 }) => {
   const [showOnlyDependencies, setShowOnlyDependencies] = useState<boolean>(false);
   const [hoveredInteractionId, setHoveredInteractionId] = useState<string | null>(null);
@@ -219,6 +221,118 @@ export const InterdependencyGantt: React.FC<InterdependencyGanttProps> = ({
     return lines;
   }, [ganttInteractions, daysInMonth, hoveredInteractionId]);
 
+  // Translate engagement rows and dates into bounding boxes on the Gantt chart
+  const engagementBoxes = useMemo(() => {
+    if (!engagements || engagements.length === 0 || ganttInteractions.length === 0) return [];
+
+    const boxes: Array<{
+      id: string;
+      title: string;
+      top: number;
+      left: number;
+      width: number;
+      height: number;
+      isHighlighted: boolean;
+      colorIndex: number;
+    }> = [];
+
+    engagements.forEach((eng, engIdx) => {
+      const engInteractions = ganttInteractions.filter(item => item.engagementId === eng.id);
+      if (engInteractions.length === 0) return;
+
+      const rowIndices = engInteractions.map(item => ganttInteractions.indexOf(item));
+      const minRow = Math.min(...rowIndices);
+      const maxRow = Math.max(...rowIndices);
+
+      const dayIndices = engInteractions
+        .map(item => daysInMonth.indexOf(item.ganttDate))
+        .filter(idx => idx !== -1);
+      
+      if (dayIndices.length === 0) return;
+
+      const minCol = Math.min(...dayIndices);
+      const maxCol = Math.max(...dayIndices);
+
+      // Highlight if any interaction belonging to this engagement is currently hovered
+      const hasHoveredInteraction = engInteractions.some(item => item.id === hoveredInteractionId);
+
+      const top = minRow * rowHeight + 2;
+      const height = (maxRow - minRow + 1) * rowHeight - 4;
+      const left = minCol * colWidth + 2;
+      const width = (maxCol - minCol + 1) * colWidth - 4;
+
+      boxes.push({
+        id: eng.id,
+        title: eng.title,
+        top,
+        left,
+        width,
+        height,
+        isHighlighted: hasHoveredInteraction,
+        colorIndex: engIdx,
+      });
+    });
+
+    return boxes;
+  }, [engagements, ganttInteractions, daysInMonth, hoveredInteractionId]);
+
+  const getEngagementBoxColors = (colorIndex: number, isHighlighted: boolean) => {
+    const schemes = [
+      // Indigo
+      {
+        bg: "bg-indigo-50/10",
+        bgHover: "bg-indigo-100/20",
+        border: "border-indigo-400/40",
+        borderActive: "border-indigo-600",
+        badgeBg: "bg-indigo-100 text-indigo-700",
+        ring: "ring-indigo-100/50"
+      },
+      // Emerald
+      {
+        bg: "bg-emerald-50/10",
+        bgHover: "bg-emerald-100/20",
+        border: "border-emerald-400/40",
+        borderActive: "border-emerald-600",
+        badgeBg: "bg-emerald-100 text-emerald-700",
+        ring: "ring-emerald-100/50"
+      },
+      // Purple
+      {
+        bg: "bg-purple-50/10",
+        bgHover: "bg-purple-100/20",
+        border: "border-purple-400/40",
+        borderActive: "border-purple-600",
+        badgeBg: "bg-purple-100 text-purple-700",
+        ring: "ring-purple-100/50"
+      },
+      // Amber
+      {
+        bg: "bg-amber-50/10",
+        bgHover: "bg-amber-100/20",
+        border: "border-amber-400/40",
+        borderActive: "border-amber-600",
+        badgeBg: "bg-amber-100 text-amber-800",
+        ring: "ring-amber-100/50"
+      },
+      // Blue
+      {
+        bg: "bg-blue-50/10",
+        bgHover: "bg-blue-100/20",
+        border: "border-blue-400/40",
+        borderActive: "border-blue-650",
+        badgeBg: "bg-blue-100 text-blue-800",
+        ring: "ring-blue-100/50"
+      }
+    ];
+
+    const scheme = schemes[colorIndex % schemes.length];
+    return {
+      bg: isHighlighted ? scheme.bgHover : scheme.bg,
+      border: isHighlighted ? `${scheme.borderActive} ring-2 ${scheme.ring}` : scheme.border,
+      badge: scheme.badgeBg
+    };
+  };
+
   return (
     <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 animate-in fade-in duration-300">
       
@@ -301,6 +415,7 @@ export const InterdependencyGantt: React.FC<InterdependencyGanttProps> = ({
                 {ganttInteractions.map((item) => {
                   const isHovered = hoveredInteractionId === item.id;
                   const statusColors = getStatusMap(item.status);
+                  const itemEng = item.engagementId ? engagements.find(e => e.id === item.engagementId) : null;
 
                   return (
                     <div
@@ -330,13 +445,21 @@ export const InterdependencyGantt: React.FC<InterdependencyGanttProps> = ({
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 text-[9.5px] text-slate-450 font-bold font-mono truncate mt-0.5">
-                        <span className="text-indigo-650">{item.assignee}</span>
-                        <span className="text-slate-300">•</span>
+                        <span className="text-indigo-650 shrink-0">{item.assignee}</span>
+                        {itemEng && (
+                          <>
+                            <span className="text-slate-300 shrink-0">•</span>
+                            <span className="px-1 py-0.2 bg-indigo-50/80 text-indigo-650/90 rounded text-[7.5px] font-black max-w-[95px] truncate inline-flex items-center gap-0.5" title={`Engagement: ${itemEng.title}`}>
+                              💼 {itemEng.title}
+                            </span>
+                          </>
+                        )}
+                        <span className="text-slate-300 shrink-0">•</span>
                         <span className="truncate">{item.client}</span>
                         {item.isWaiting && (
                           <>
-                            <span className="text-slate-300">•</span>
-                            <span className="text-[8px] text-indigo-500 font-extrabold font-mono italic">Projected</span>
+                            <span className="text-slate-300 shrink-0">•</span>
+                            <span className="text-[8px] text-indigo-500 font-extrabold font-mono italic shrink-0">Projected</span>
                           </>
                         )}
                       </div>
@@ -383,6 +506,39 @@ export const InterdependencyGantt: React.FC<InterdependencyGanttProps> = ({
               {/* TIMELINE GANTT TRACK GRID BODY */}
               <div className="relative divide-y divide-slate-100 overflow-hidden" style={{ height: `${ganttInteractions.length * rowHeight}px` }}>
                 
+                {/* Engagement Group Bounding Boxes */}
+                {engagementBoxes.map((box) => {
+                  const colors = getEngagementBoxColors(box.colorIndex, box.isHighlighted);
+                  return (
+                    <div
+                      key={`eng-box-${box.id}`}
+                      style={{
+                        position: "absolute",
+                        top: `${box.top}px`,
+                        left: `${box.left}px`,
+                        width: `${box.width}px`,
+                        height: `${box.height}px`,
+                        zIndex: 10
+                      }}
+                      className={`rounded-xl border border-dashed transition-all duration-300 pointer-events-none flex flex-col justify-between ${colors.bg} ${colors.border}`}
+                    >
+                      {/* Top floating label badge */}
+                      {box.width > 90 ? (
+                        <div className="absolute top-1.5 left-2 flex items-center gap-1 max-w-[calc(100%-8px)] overflow-hidden">
+                          <Briefcase className="w-2.5 h-2.5 opacity-80 shrink-0 text-slate-600" />
+                          <span className={`text-[8.5px] font-black uppercase font-mono px-1 py-0.2 rounded tracking-wider shadow-3xs truncate max-w-[130px] ${colors.badge}`}>
+                            {box.title}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="absolute top-1.5 left-1.5 flex items-center justify-center p-0.5 rounded bg-white/75 border border-slate-205/30" title={`Engagement: ${box.title}`}>
+                          <Briefcase className="w-2.5 h-2.5 text-slate-600" />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
                 {/* SVG Dependency Overlay */}
                 <svg 
                   className="absolute inset-0 pointer-events-none z-20"
