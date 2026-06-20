@@ -57,6 +57,7 @@ import {
   CheckSquare,
   Settings,
   AlertCircle,
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Edit3,
@@ -91,6 +92,51 @@ import {
   getDensityPadding
 } from "./data";
 import { apiService } from "./services/CrmApiService";
+
+export function parseDurationShorthand(value: string): number | null {
+  if (!value) return null;
+  const trimmed = String(value).trim().toLowerCase();
+  if (!trimmed) return null;
+
+  // Check if it's already a clean integer
+  if (/^\d+$/.test(trimmed)) {
+    return parseInt(trimmed, 10);
+  }
+
+  // Regular expression to match numbers followed by optional spaces and a unit (w, d, h, m)
+  const regex = /(\d+(?:\.\d+)?)\s*(w|d|h|m)/g;
+  let totalMinutes = 0;
+  let match;
+  let found = false;
+
+  while ((match = regex.exec(trimmed)) !== null) {
+    found = true;
+    const num = parseFloat(match[1]);
+    const unit = match[2];
+
+    if (unit === 'w') {
+      totalMinutes += num * 7 * 24 * 60;
+    } else if (unit === 'd') {
+      totalMinutes += num * 24 * 60;
+    } else if (unit === 'h') {
+      totalMinutes += num * 60;
+    } else if (unit === 'm') {
+      totalMinutes += num;
+    }
+  }
+
+  if (found) {
+    return Math.round(totalMinutes);
+  }
+
+  // Fallback for when there is no matching unit but is a number with some text
+  const fallbackNum = parseFloat(trimmed);
+  if (!isNaN(fallbackNum)) {
+    return Math.round(fallbackNum);
+  }
+
+  return null;
+}
 
 export default function App() {
   // Session State
@@ -197,6 +243,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"dashboard" | "interactions" | "engagements" | "contacts" | "entities" | "notes" | "documents" | "users" | "audit" | "tags" | "settings">("dashboard");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchActive, setIsSearchActive] = useState(false);
+
+  // Advanced search filtering states
+  const [searchFilterStartDate, setSearchFilterStartDate] = useState<string>("");
+  const [searchFilterEndDate, setSearchFilterEndDate] = useState<string>("");
+  const [searchFilterAssignee, setSearchFilterAssignee] = useState<string>("ALL");
+  const [searchFilterEntityTypes, setSearchFilterEntityTypes] = useState<string[]>(["interaction", "contact", "entity", "engagement"]);
 
   // Settings form states
   const [settingsCurrentPassword, setSettingsCurrentPassword] = useState("");
@@ -766,6 +818,40 @@ export default function App() {
       
       // within 24 hours of system date (including past today/overdue and coming up tomorrow)
       return diffHours >= -24 && diffHours <= 24;
+    });
+  }, [interactions]);
+
+  const atRiskDependentInteractions = useMemo(() => {
+    const todayStr = new Date().toISOString().split("T")[0];
+    const today = new Date(todayStr);
+
+    return interactions.filter((item) => {
+      if (!item.PrevInteraction) return false;
+      if (item.status === "COMPLETED" || item.status === "CANCELED") return false;
+      if (!item.date) return false;
+
+      const depIdStr = String(item.PrevInteraction);
+      const predecessor = interactions.find(prev => 
+        prev.id === depIdStr || 
+        String(prev.id.replace(/\D/g, '') || prev.id) === depIdStr
+      );
+
+      const targetDate = new Date(item.date);
+      const diffTime = targetDate.getTime() - today.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      // Warn if overdue (diffDays < 0) or about to miss (diffDays <= 3 days)
+      const aboutToMiss = diffDays <= 3;
+      
+      // Delay risk if predecessor is active and its date is past or equal to item's date
+      let predecessorDelayRisk = false;
+      if (predecessor && predecessor.status !== "COMPLETED" && predecessor.status !== "CANCELED") {
+        if (predecessor.date && predecessor.date >= item.date) {
+          predecessorDelayRisk = true;
+        }
+      }
+
+      return aboutToMiss || predecessorDelayRisk;
     });
   }, [interactions]);
 
@@ -1580,14 +1666,169 @@ export default function App() {
   const searchResults = useMemo(() => {
     if (!searchQuery) return { interactions: [], contacts: [], entities: [], engagements: [] };
     const q = searchQuery.toLowerCase();
+
+    // 1. Interactions
+    let filteredInteractions: Interaction[] = [];
+    if (searchFilterEntityTypes.includes("interaction")) {
+      filteredInteractions = interactions.filter((i) => {
+        // Text Match
+        const matchesQuery = (i.subject || "").toLowerCase().includes(q) || 
+                             (i.summary || "").toLowerCase().includes(q) || 
+                             (i.client || "").toLowerCase().includes(q) ||
+                             (i.assignee || "").toLowerCase().includes(q);
+        if (!matchesQuery) return false;
+
+        // Assignee filter
+        if (searchFilterAssignee !== "ALL") {
+          if ((i.assignee || "").toLowerCase() !== searchFilterAssignee.toLowerCase()) {
+            return false;
+          }
+        }
+
+        // Date range filter
+        if (searchFilterStartDate) {
+          if (!i.date || i.date < searchFilterStartDate) return false;
+        }
+        if (searchFilterEndDate) {
+          if (!i.date || i.date > searchFilterEndDate) return false;
+        }
+
+        return true;
+      });
+    }
+
+    // 2. Contacts
+    let filteredContacts: Contact[] = [];
+    if (searchFilterEntityTypes.includes("contact")) {
+      filteredContacts = contacts.filter((c) => {
+        // Text Match
+        const matchesQuery = (c.name || "").toLowerCase().includes(q) || 
+                             (c.role || "").toLowerCase().includes(q) || 
+                             (c.company || "").toLowerCase().includes(q) || 
+                             (c.email || "").toLowerCase().includes(q);
+        if (!matchesQuery) return false;
+
+        // Assignee filter
+        if (searchFilterAssignee !== "ALL") {
+          const relatedInteractions = interactions.filter((item) => item.client === c.company);
+          const hasAssigneeInt = relatedInteractions.some(
+            (item) => (item.assignee || "").toLowerCase() === searchFilterAssignee.toLowerCase()
+          );
+          if (!hasAssigneeInt) return false;
+        }
+
+        // Date range filter
+        if (searchFilterStartDate || searchFilterEndDate) {
+          const dateStr = c.updatedAt ? c.updatedAt.split("T")[0] : null;
+          let isInRange = false;
+          if (dateStr) {
+            const matchesStart = !searchFilterStartDate || dateStr >= searchFilterStartDate;
+            const matchesEnd = !searchFilterEndDate || dateStr <= searchFilterEndDate;
+            if (matchesStart && matchesEnd) {
+              isInRange = true;
+            }
+          }
+          if (!isInRange) {
+            const relatedInteractions = interactions.filter((item) => item.client === c.company);
+            const hasIntInRange = relatedInteractions.some((item) => {
+              if (!item.date) return false;
+              const matchesStart = !searchFilterStartDate || item.date >= searchFilterStartDate;
+              const matchesEnd = !searchFilterEndDate || item.date <= searchFilterEndDate;
+              return matchesStart && matchesEnd;
+            });
+            if (!hasIntInRange) return false;
+          }
+        }
+
+        return true;
+      });
+    }
+
+    // 3. Companies (Entities)
+    let filteredEntities: Entity[] = [];
+    if (searchFilterEntityTypes.includes("entity")) {
+      filteredEntities = visibleEntities.filter((e) => {
+        // Text Match
+        const matchesQuery = (e.name || "").toLowerCase().includes(q) || 
+                             (e.industry || "").toLowerCase().includes(q) || 
+                             (e.location || "").toLowerCase().includes(q);
+        if (!matchesQuery) return false;
+
+        // Assignee filter
+        if (searchFilterAssignee !== "ALL") {
+          const relatedInteractions = interactions.filter((item) => item.client === e.name);
+          const hasAssigneeInt = relatedInteractions.some(
+            (item) => (item.assignee || "").toLowerCase() === searchFilterAssignee.toLowerCase()
+          );
+          if (!hasAssigneeInt) return false;
+        }
+
+        // Date range filter
+        if (searchFilterStartDate || searchFilterEndDate) {
+          const relatedInteractions = interactions.filter((item) => item.client === e.name);
+          const hasIntInRange = relatedInteractions.some((item) => {
+            if (!item.date) return false;
+            const matchesStart = !searchFilterStartDate || item.date >= searchFilterStartDate;
+            const matchesEnd = !searchFilterEndDate || item.date <= searchFilterEndDate;
+            return matchesStart && matchesEnd;
+          });
+          if (!hasIntInRange) return false;
+        }
+
+        return true;
+      });
+    }
+
+    // 4. Engagements
+    let filteredEngagements: Engagement[] = [];
+    if (searchFilterEntityTypes.includes("engagement")) {
+      filteredEngagements = engagements.filter((g) => {
+        // Text Match
+        const matchesQuery = (g.title || "").toLowerCase().includes(q) || 
+                             (g.client || "").toLowerCase().includes(q) || 
+                             (g.type || "").toLowerCase().includes(q) || 
+                             (g.description || "").toLowerCase().includes(q);
+        if (!matchesQuery) return false;
+
+        // Assignee filter
+        if (searchFilterAssignee !== "ALL") {
+          const relatedInteractions = interactions.filter((item) => item.engagementId === g.id);
+          const hasAssigneeInt = relatedInteractions.some(
+            (item) => (item.assignee || "").toLowerCase() === searchFilterAssignee.toLowerCase()
+          );
+          if (!hasAssigneeInt) return false;
+        }
+
+        // Date range filter
+        if (searchFilterStartDate) {
+          if (g.endDate && g.endDate < searchFilterStartDate) return false;
+        }
+        if (searchFilterEndDate) {
+          if (g.startDate && g.startDate > searchFilterEndDate) return false;
+        }
+
+        return true;
+      });
+    }
+
     return {
-      interactions: interactions.filter((i) => (i.subject || "").toLowerCase().includes(q) || (i.summary || "").toLowerCase().includes(q) || (i.client || "").toLowerCase().includes(q)),
-      contacts: contacts.filter((c) => (c.name || "").toLowerCase().includes(q) || (c.role || "").toLowerCase().includes(q) || (c.company || "").toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q)),
-      entities: visibleEntities.filter((e) => (e.name || "").toLowerCase().includes(q) || (e.industry || "").toLowerCase().includes(q) || (e.location || "").toLowerCase().includes(q)),
-      engagements: engagements.filter((g) => (g.title || "").toLowerCase().includes(g.title ? q : "") || (g.client || "").toLowerCase().includes(g.client ? q : "") || (g.type || "").toLowerCase().includes(g.type ? q : "") || (g.description || "").toLowerCase().includes(g.description ? q : "")),
-      total: 0
+      interactions: filteredInteractions,
+      contacts: filteredContacts,
+      entities: filteredEntities,
+      engagements: filteredEngagements,
+      total: filteredInteractions.length + filteredContacts.length + filteredEntities.length + filteredEngagements.length
     };
-  }, [searchQuery, interactions, contacts, visibleEntities, engagements]);
+  }, [
+    searchQuery,
+    interactions,
+    contacts,
+    visibleEntities,
+    engagements,
+    searchFilterStartDate,
+    searchFilterEndDate,
+    searchFilterAssignee,
+    searchFilterEntityTypes
+  ]);
 
   useEffect(() => {
     setIsSearchActive(searchQuery.trim().length > 0);
@@ -1606,7 +1847,7 @@ export default function App() {
         ...intForm,
         PrevInteraction: intForm.PrevInteraction || null,
         engagementId: intForm.engagementId || null,
-        duration: intForm.duration ? parseInt(String(intForm.duration)) : null,
+        duration: intForm.duration ? parseDurationShorthand(String(intForm.duration)) : null,
         tagIds: [],
         contactRoles: {},
         followUpDate: intForm.followUpDate || "",
@@ -1763,10 +2004,17 @@ export default function App() {
 
   const handleUpdateItem = async (type: "interaction" | "contact" | "entity" | "engagement" | "user", payload: any) => {
     if (type === "interaction") {
-      setInteractions((prev) => prev.map((item) => (item.id === payload.id ? payload : item)));
-      await syncToServer(`/api/interactions/${payload.id}`, "PUT", payload);
+      const parsedDuration = payload.duration !== undefined && payload.duration !== null && payload.duration !== ""
+        ? parseDurationShorthand(String(payload.duration))
+        : null;
+      const updatedPayload = {
+        ...payload,
+        duration: parsedDuration
+      };
+      setInteractions((prev) => prev.map((item) => (item.id === payload.id ? updatedPayload : item)));
+      await syncToServer(`/api/interactions/${payload.id}`, "PUT", updatedPayload);
       if (payload.status === "COMPLETED") {
-        const latestInteractions = interactions.map(i => i.id === payload.id ? payload : i);
+        const latestInteractions = interactions.map(i => i.id === payload.id ? updatedPayload : i);
         await triggerCompletedDependencies([payload.id], latestInteractions);
       }
       await loadSQLiteState();
@@ -3142,6 +3390,46 @@ export default function App() {
                           <span className="text-[9px] text-amber-700 font-bold">({item.date})</span>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* At-Risk Dependent Interactions Alert Bannner */}
+              {atRiskDependentInteractions.length > 0 && (
+                <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl flex items-start gap-3 shadow-md text-xs leading-relaxed animate-in slide-in-from-top-4 duration-300">
+                  <span className="p-2 bg-rose-100 text-rose-600 rounded-lg shrink-0">
+                    <AlertTriangle className="w-5 h-5 animate-pulse text-rose-600" />
+                  </span>
+                  <div className="space-y-1.5 flex-1">
+                    <h4 className="font-bold text-rose-805 font-mono text-[11px] uppercase tracking-wider">⚠️ DEP RISK: {atRiskDependentInteractions.length} INTERDEPENDENT MILESTONES AT RISK</h4>
+                    <p className="text-slate-650 text-[11px]">
+                      The system has flagged dependent interactions scheduled close to, overdue, or blocked by uncompleted predecessor tasks. Click any card below to review and align timelines:
+                    </p>
+                    <div className="flex flex-wrap gap-2.5 pt-1.5 font-mono">
+                      {atRiskDependentInteractions.map((item) => {
+                        const depIdStr = String(item.PrevInteraction);
+                        const predecessor = interactions.find(prev => 
+                          prev.id === depIdStr || 
+                          String(prev.id.replace(/\D/g, '') || prev.id) === depIdStr
+                        );
+                        
+                        return (
+                          <div 
+                            key={item.id} 
+                            onClick={() => setSelectedItem({ dataType: "interaction", data: item })}
+                            className="bg-white hover:bg-rose-50/50 border border-rose-200/80 px-3 py-2 rounded-lg text-[10px] text-slate-700 font-semibold cursor-pointer shadow-2xs transition hover:scale-101 flex flex-col gap-1 max-w-sm"
+                          >
+                            <div className="flex items-center gap-2 justify-between font-sans">
+                              <span className="font-bold text-rose-800 truncate text-xs">{item.subject}</span>
+                              <span className="text-[9.5px] text-rose-900 bg-rose-100/70 px-1.5 py-0.5 rounded leading-none font-bold font-mono">Due: {item.date}</span>
+                            </div>
+                            <div className="text-[9.5px] text-slate-400 font-normal">
+                              ⛓️ Predecessor: <span className="font-semibold text-slate-600">{predecessor ? predecessor.subject : `#${item.PrevInteraction}`}</span> {predecessor ? `[${predecessor.status}, ${predecessor.date || "Pending"}]` : ""}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -7552,74 +7840,288 @@ export default function App() {
       {/* DYNAMIC GLOBAL SEARCH RESULTS MODAL */}
       {isSearchActive && (
         <div id="search-results-modal" className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center z-50 p-12">
-          <div className="fixed inset-0" onClick={() => { setIsSearchActive(false); setSearchQuery(""); }} />
+          <div className="fixed inset-0 bg-slate-900/10" onClick={() => { setIsSearchActive(false); setSearchQuery(""); }} />
           
-          <div className="bg-white w-[600px] max-h-[500px] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 z-[60] animate-in zoom-in-95 duration-200">
-            <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-              <span className="flex items-center gap-2 text-slate-500 text-xs font-bold uppercase">
-                <Search className="w-4 h-4" /> Global Database Results for &quot;{searchQuery}&quot;
+          <div className="bg-white w-[880px] h-[660px] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 z-[60] animate-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-slate-100 bg-white flex justify-between items-center shrink-0">
+              <span className="flex items-center gap-2 text-slate-800 text-xs font-bold uppercase tracking-wider font-sans">
+                <Search className="w-4 h-4 text-slate-500" /> Global Database Results for &quot;{searchQuery}&quot;
+                <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-black font-mono">
+                  {searchResults.total} {searchResults.total === 1 ? "Match" : "Matches"}
+                </span>
               </span>
-              <button onClick={() => { setIsSearchActive(false); setSearchQuery(""); }} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => { setIsSearchActive(false); setSearchQuery(""); }} className="text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-50 rounded-lg transition-colors">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-6">
-              <section>
-                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Interactions ({searchResults.interactions.length})</h4>
-                {searchResults.interactions.length === 0 ? <p className="text-xs text-slate-400 italic">No matches</p> : (
-                  <div className="space-y-1">
-                    {searchResults.interactions.map((i) => (
-                      <div key={i.id} onClick={() => { setSelectedItem({ dataType: "interaction", data: i }); setIsSearchActive(false); setSearchQuery(""); }} className="p-2 hover:bg-slate-50 border border-transparent hover:border-slate-100 rounded-lg cursor-pointer">
-                        <p className="font-semibold text-xs text-slate-900">{highlightText(i.subject, searchQuery)}</p>
-                        <p className="text-[10px] text-slate-500">Corporate client mapping: {highlightText(i.client, searchQuery)}</p>
-                      </div>
-                    ))}
-                  </div>
+            {/* ADVANCED FILTER PANEL */}
+            <div className="px-5 py-4 bg-slate-50 border-b border-slate-200/80 space-y-3.5 shrink-0">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 font-mono">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" /> Advanced Filtering Parameters
+                </span>
+                
+                {/* Reset button */}
+                {(searchFilterStartDate || searchFilterEndDate || searchFilterAssignee !== "ALL" || searchFilterEntityTypes.length < 4) && (
+                  <button 
+                    onClick={() => {
+                      setSearchFilterStartDate("");
+                      setSearchFilterEndDate("");
+                      setSearchFilterAssignee("ALL");
+                      setSearchFilterEntityTypes(["interaction", "contact", "entity", "engagement"]);
+                      showToast("Search filters restored to original default values.", "info");
+                    }}
+                    className="flex items-center gap-1 text-[9.5px] font-extrabold text-indigo-650 hover:text-indigo-800 transition-colors uppercase font-mono bg-white hover:bg-indigo-50 border border-slate-200/60 rounded px-2 py-0.5 cursor-pointer"
+                  >
+                    <RefreshCw className="w-2.5 h-2.5" /> Reset Filters
+                  </button>
                 )}
-              </section>
+              </div>
 
-              <section>
-                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Contacts ({searchResults.contacts.length})</h4>
-                {searchResults.contacts.length === 0 ? <p className="text-xs text-slate-400 italic">No matches</p> : (
-                  <div className="space-y-1">
-                    {searchResults.contacts.map((c) => (
-                      <div key={c.id} onClick={() => { setSelectedItem({ dataType: "contact", data: c }); setIsSearchActive(false); setSearchQuery(""); }} className="p-2 hover:bg-slate-50 border border-transparent hover:border-slate-100 rounded-lg cursor-pointer">
-                        <p className="font-semibold text-xs text-slate-900">{highlightText(c.name, searchQuery)}</p>
-                        <p className="text-[10px] text-slate-500">{highlightText(c.role, searchQuery)} at {highlightText(c.company, searchQuery)}</p>
-                      </div>
-                    ))}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs">
+                {/* 1. Entity Type Filters */}
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+                    Lookup Entity Type
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      { id: "interaction", label: "Interactions", icon: "💬", activeColor: "bg-blue-600/10 border-blue-600 hover:bg-blue-600/15 text-blue-800" },
+                      { id: "contact", label: "Contacts", icon: "👥", activeColor: "bg-emerald-600/10 border-emerald-600 hover:bg-emerald-600/15 text-emerald-800" },
+                      { id: "entity", label: "Companies", icon: "🏢", activeColor: "bg-amber-600/10 border-amber-600 hover:bg-amber-600/15 text-amber-800" },
+                      { id: "engagement", label: "Engagements", icon: "💼", activeColor: "bg-purple-600/10 border-purple-600 hover:bg-purple-600/15 text-purple-800" }
+                    ].map((type) => {
+                      const isSelected = searchFilterEntityTypes.includes(type.id);
+                      return (
+                        <button
+                          key={type.id}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              setSearchFilterEntityTypes(searchFilterEntityTypes.filter((t) => t !== type.id));
+                            } else {
+                              setSearchFilterEntityTypes([...searchFilterEntityTypes, type.id]);
+                            }
+                          }}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold cursor-pointer transition-all duration-150 ${
+                            isSelected
+                              ? `${type.activeColor} border-2 shadow-xs`
+                              : "bg-white border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-750"
+                          }`}
+                        >
+                          <span className="text-xs shrink-0">{type.icon}</span>
+                          <span className="truncate">{type.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
-                )}
-              </section>
+                </div>
 
-              <section>
-                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Companies ({searchResults.entities.length})</h4>
-                {searchResults.entities.length === 0 ? <p className="text-xs text-slate-400 italic">No matches</p> : (
-                  <div className="space-y-1">
-                    {searchResults.entities.map((e) => (
-                      <div key={e.id} onClick={() => { setSelectedItem({ dataType: "entity", data: e }); setIsSearchActive(false); setSearchQuery(""); }} className="p-2 hover:bg-slate-50 border border-transparent hover:border-slate-100 rounded-lg cursor-pointer">
-                        <p className="font-semibold text-xs text-slate-900">{highlightText(e.name, searchQuery)}</p>
-                        <p className="text-[10px] text-slate-500">{highlightText(e.industry, searchQuery)} and based in {highlightText(e.location, searchQuery)}</p>
-                      </div>
-                    ))}
+                {/* 2. Assignee Assignment Filter */}
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+                    Owner / Assignee
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={searchFilterAssignee}
+                      onChange={(e) => setSearchFilterAssignee(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg py-2 pl-9 pr-6 text-xs font-semibold text-slate-700 outline-none focus:border-indigo-500 shadow-3xs cursor-pointer focus:ring-1 focus:ring-indigo-505 transition"
+                    >
+                      <option value="ALL">All Assigned Personnel</option>
+                      {Array.from(new Set([
+                        ...systemUsers.map((u) => u.name),
+                        "Alex Rivera",
+                        "David Jenkins"
+                      ])).filter(Boolean).map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    <User className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
                   </div>
-                )}
-              </section>
+                  <p className="text-[9.5px] text-slate-400 italic">Filters items linked to or managed by selected analyst</p>
+                </div>
 
-              <section>
-                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Engagements ({searchResults.engagements.length})</h4>
-                {searchResults.engagements.length === 0 ? <p className="text-xs text-slate-400 italic">No matches</p> : (
-                  <div className="space-y-1">
-                    {searchResults.engagements.map((g) => (
-                      <div key={g.id} onClick={() => { setSelectedItem({ dataType: "engagement", data: g }); setSelectedEngagementForView(g); setActiveTab("engagements"); setIsSearchActive(false); setSearchQuery(""); }} className="p-2 hover:bg-slate-50 border border-transparent hover:border-slate-100 rounded-lg cursor-pointer">
-                        <p className="font-semibold text-xs text-slate-900">{highlightText(g.title, searchQuery)}</p>
-                        <p className="text-[10px] text-slate-500">{highlightText(g.type, searchQuery)} &bull; {highlightText(g.client, searchQuery)}</p>
-                      </div>
-                    ))}
+                {/* 3. Date Range Filter */}
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+                    Activity Date Range
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <span className="text-[9px] uppercase tracking-wider font-mono text-slate-400 font-bold">From</span>
+                      <input
+                        type="date"
+                        value={searchFilterStartDate}
+                        onChange={(e) => setSearchFilterStartDate(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-lg py-1 px-2 text-[11px] font-semibold text-slate-700 outline-none focus:border-indigo-500 shadow-3xs cursor-pointer focus:ring-1 focus:ring-indigo-500 transition"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[9px] uppercase tracking-wider font-mono text-slate-400 font-bold">To</span>
+                      <input
+                        type="date"
+                        value={searchFilterEndDate}
+                        onChange={(e) => setSearchFilterEndDate(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-lg py-1 px-2 text-[11px] font-semibold text-slate-700 outline-none focus:border-indigo-500 shadow-3xs cursor-pointer focus:ring-1 focus:ring-indigo-500 transition"
+                      />
+                    </div>
                   </div>
-                )}
-              </section>
+                  <p className="text-[9.5px] text-slate-400 italic">Standard meeting dates & active engagement scopes</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Results Container */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {searchResults.total === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                  <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center mb-3">
+                    <Filter className="w-6 h-6 text-slate-300" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-900">No matching system records found</p>
+                  <p className="text-xs text-slate-500 max-w-sm mt-1">
+                    Your criteria did not match any files, logs, or corporate entities. Try adjusting your query string or expanding search filters above.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* INTERACTIONS SECTION */}
+                  {searchFilterEntityTypes.includes("interaction") && (
+                    <section className="bg-white rounded-xl border border-slate-100 p-4 shadow-3xs hover:border-slate-200 transition-colors duration-150">
+                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5 font-mono">
+                        💬 Interactions ({searchResults.interactions.length})
+                      </h4>
+                      {searchResults.interactions.length === 0 ? (
+                        <p className="text-xs text-slate-400 italic font-mono pl-2">No interactions match specified filters</p>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {searchResults.interactions.map((i) => (
+                            <div 
+                              key={i.id} 
+                              onClick={() => { setSelectedItem({ dataType: "interaction", data: i }); setIsSearchActive(false); setSearchQuery(""); }} 
+                              className="p-3 bg-slate-50 hover:bg-slate-100/80 border border-slate-100 hover:border-slate-200 rounded-xl cursor-pointer transition duration-150 flex flex-col justify-between"
+                            >
+                              <div>
+                                <p className="font-bold text-xs text-slate-900 line-clamp-1">{highlightText(i.subject, searchQuery)}</p>
+                                <p className="text-[10px] text-slate-500 mt-0.5 font-mono">Client mapping: {highlightText(i.client, searchQuery)}</p>
+                                {i.summary && <p className="text-[10px] text-slate-600 mt-2 line-clamp-2 italic bg-white/70 p-1.5 rounded border border-slate-100/60">{i.summary}</p>}
+                              </div>
+                              <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-100 text-[9px] font-mono font-bold text-slate-450 uppercase tracking-wider">
+                                <span className="bg-blue-50/70 text-blue-650 px-1.5 py-0.5 rounded leading-none shrink-0">{i.assignee}</span>
+                                <span className="text-slate-400 shrink-0">{i.date}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
+
+                  {/* CONTACTS SECTION */}
+                  {searchFilterEntityTypes.includes("contact") && (
+                    <section className="bg-white rounded-xl border border-slate-100 p-4 shadow-3xs hover:border-slate-200 transition-colors duration-150">
+                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5 font-mono">
+                        👥 Contacts ({searchResults.contacts.length})
+                      </h4>
+                      {searchResults.contacts.length === 0 ? (
+                        <p className="text-xs text-slate-400 italic font-mono pl-2">No contacts match specified filters</p>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {searchResults.contacts.map((c) => (
+                            <div 
+                              key={c.id} 
+                              onClick={() => { setSelectedItem({ dataType: "contact", data: c }); setIsSearchActive(false); setSearchQuery(""); }} 
+                              className="p-3 bg-slate-50 hover:bg-slate-100/80 border border-slate-100 hover:border-slate-200 rounded-xl cursor-pointer transition duration-150 flex flex-col justify-between"
+                            >
+                              <div>
+                                <p className="font-bold text-xs text-slate-900">{highlightText(c.name, searchQuery)}</p>
+                                <p className="text-[10px] text-slate-605 mt-0.5">{highlightText(c.role, searchQuery)} at <span className="font-bold">{highlightText(c.company, searchQuery)}</span></p>
+                                {c.email && <p className="text-[9.5px] text-indigo-600 font-mono mt-1.5 truncate">{c.email}</p>}
+                              </div>
+                              <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-100 text-[9px] font-mono font-bold text-slate-450 uppercase tracking-wider">
+                                <span className="bg-emerald-50/70 text-emerald-700 px-1.5 py-0.5 rounded leading-none shrink-0">Company Target</span>
+                                {c.updatedAt && <span className="text-slate-400 shrink-0">Updated {c.updatedAt.split("T")[0]}</span>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
+
+                  {/* COMPANIES (ENTITIES) SECTION */}
+                  {searchFilterEntityTypes.includes("entity") && (
+                    <section className="bg-white rounded-xl border border-slate-100 p-4 shadow-3xs hover:border-slate-200 transition-colors duration-150">
+                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5 font-mono">
+                        🏢 Companies ({searchResults.entities.length})
+                      </h4>
+                      {searchResults.entities.length === 0 ? (
+                        <p className="text-xs text-slate-400 italic font-mono pl-2">No company mappings match specified filters</p>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {searchResults.entities.map((e) => (
+                            <div 
+                              key={e.id} 
+                              onClick={() => { setSelectedItem({ dataType: "entity", data: e }); setIsSearchActive(false); setSearchQuery(""); }} 
+                              className="p-3 bg-slate-50 hover:bg-slate-100/80 border border-slate-100 hover:border-slate-200 rounded-xl cursor-pointer transition duration-150 flex flex-col justify-between"
+                            >
+                              <div>
+                                <p className="font-bold text-xs text-slate-900">{highlightText(e.name, searchQuery)}</p>
+                                <p className="text-[10px] text-slate-500 mt-0.5">{highlightText(e.industry, searchQuery)} • {highlightText(e.location, searchQuery)}</p>
+                              </div>
+                              <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-100 text-[9px] font-mono font-bold text-slate-450 uppercase tracking-wider">
+                                <span className="bg-amber-50/70 text-amber-800 px-1.5 py-0.5 rounded leading-none shrink-0">{e.tier} TIer account</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
+
+                  {/* ENGAGEMENTS SECTION */}
+                  {searchFilterEntityTypes.includes("engagement") && (
+                    <section className="bg-white rounded-xl border border-slate-100 p-4 shadow-3xs hover:border-slate-200 transition-colors duration-150">
+                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5 font-mono">
+                        💼 Engagements ({searchResults.engagements.length})
+                      </h4>
+                      {searchResults.engagements.length === 0 ? (
+                        <p className="text-xs text-slate-400 italic font-mono pl-2">No engagements match specified filters</p>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {searchResults.engagements.map((g) => (
+                            <div 
+                              key={g.id} 
+                              onClick={() => { setSelectedItem({ dataType: "engagement", data: g }); setSelectedEngagementForView(g); setActiveTab("engagements"); setIsSearchActive(false); setSearchQuery(""); }} 
+                              className="p-3 bg-slate-50 hover:bg-slate-100/80 border border-slate-100 hover:border-slate-200 rounded-xl cursor-pointer transition duration-150 flex flex-col justify-between"
+                            >
+                              <div>
+                                <p className="font-bold text-xs text-slate-900 line-clamp-1">{highlightText(g.title, searchQuery)}</p>
+                                <p className="text-[10px] text-slate-500 mt-0.5 font-mono">{highlightText(g.type, searchQuery)} &bull; {highlightText(g.client, searchQuery)}</p>
+                                {g.description && <p className="text-[10.5px] text-slate-600 mt-2 line-clamp-2 italic">{g.description}</p>}
+                              </div>
+                              <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-100 text-[9px] font-mono font-bold text-slate-450 uppercase tracking-wider">
+                                <span className={`px-1.5 py-0.5 rounded leading-none shrink-0 ${
+                                  g.status === "Active" ? "bg-emerald-50 text-emerald-700" :
+                                  g.status === "Pending Draft" ? "bg-amber-50 text-amber-700" :
+                                  g.status === "Under Negotiation" ? "bg-purple-50 text-purple-750" :
+                                  "bg-slate-200 text-slate-600"
+                                }`}>{g.status}</span>
+                                <span className="text-slate-400 shrink-0 font-mono tracking-tighter">{g.startDate} to {g.endDate}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -7668,6 +8170,25 @@ export default function App() {
                     <div>
                       <label className="block text-slate-500 font-bold mb-1">Target Date {intForm.PrevInteraction ? "(Optional - Auto-calculated)" : ""}</label>
                       <input type="date" required={!intForm.PrevInteraction} value={intForm.date} onChange={(e) => setIntForm({ ...intForm, date: e.target.value })} className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none animate-in fade-in" />
+                      {(() => {
+                        if (!intForm.PrevInteraction) return null;
+                        const pred = interactions.find(i => String(i.id) === String(intForm.PrevInteraction));
+                        if (!pred || !pred.date) return null;
+                        return (
+                          <div className="mt-1 flex items-center justify-between text-[10px] text-indigo-650 bg-indigo-50/50 rounded px-2.5 py-1 font-mono">
+                            <span>💡 Predecessor target Date: {pred.date}</span>
+                            {intForm.date !== pred.date && (
+                              <button
+                                type="button"
+                                onClick={() => setIntForm({ ...intForm, date: pred.date })}
+                                className="font-bold hover:underline cursor-pointer border-0 bg-transparent text-indigo-700 font-sans"
+                              >
+                                Apply suggestion
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -7741,15 +8262,32 @@ export default function App() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-slate-500 font-bold mb-1">Duration (minutes)</label>
+                      <label className="block text-slate-500 font-bold mb-1">Duration</label>
                       <input
-                        type="number"
-                        min="0"
-                        placeholder="e.g. 45"
+                        type="text"
+                        placeholder="e.g. 45m, 2h, 2d, 3w"
                         value={intForm.duration}
                         onChange={(e) => setIntForm({ ...intForm, duration: e.target.value })}
                         className="w-full bg-slate-50 border p-2.5 rounded-lg outline-none text-slate-705 font-mono"
                       />
+                      {(() => {
+                        const val = intForm.duration;
+                        if (!val) return null;
+                        const minutes = parseDurationShorthand(String(val));
+                        if (minutes === null) return null;
+                        const readableStr = minutes >= 10080 
+                          ? `${(minutes / 10080).toFixed(1)}w` 
+                          : minutes >= 1440 
+                            ? `${(minutes / 1440).toFixed(1)}d` 
+                            : minutes >= 60 
+                              ? `${(minutes / 60).toFixed(1)}h` 
+                              : `${minutes}m`;
+                        return (
+                          <p className="text-[10px] text-indigo-650 mt-1 font-mono font-medium">
+                            👉 Resolves to: <span className="font-bold">{minutes} mins</span> ({readableStr})
+                          </p>
+                        );
+                      })()}
                     </div>
                   </div>
                   <div>
@@ -8213,17 +8751,53 @@ export default function App() {
                           onChange={(e) => setSelectedItem({ ...selectedItem, data: { ...selectedItem.data, date: e.target.value } })}
                           className="w-full bg-slate-50 border p-2.5 rounded-lg font-semibold text-slate-705 outline-none font-mono"
                         />
+                        {(() => {
+                          if (!selectedItem.data.PrevInteraction) return null;
+                          const pred = interactions.find(i => String(i.id) === String(selectedItem.data.PrevInteraction));
+                          if (!pred || !pred.date) return null;
+                          return (
+                            <div className="mt-1 flex items-center justify-between text-[9px] text-indigo-650 bg-indigo-50/50 rounded px-1.5 py-0.5 font-mono">
+                              <span>💡 Suggestion: {pred.date}</span>
+                              {selectedItem.data.date !== pred.date && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedItem({ ...selectedItem, data: { ...selectedItem.data, date: pred.date } })}
+                                  className="font-bold hover:underline cursor-pointer border-0 bg-transparent text-indigo-700 font-sans"
+                                >
+                                  Apply
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                       <div>
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Duration (minutes)</label>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Duration</label>
                         <input
-                          type="number"
-                          min="0"
-                          placeholder="e.g. 45"
+                          type="text"
+                          placeholder="e.g. 45m, 2h, 2d, 3w"
                           value={selectedItem.data.duration || ""}
-                          onChange={(e) => setSelectedItem({ ...selectedItem, data: { ...selectedItem.data, duration: e.target.value ? parseInt(e.target.value) : null } })}
+                          onChange={(e) => setSelectedItem({ ...selectedItem, data: { ...selectedItem.data, duration: e.target.value } })}
                           className="w-full bg-slate-50 border p-2.5 rounded-lg font-semibold text-slate-705 outline-none font-mono"
                         />
+                        {(() => {
+                          const val = selectedItem.data.duration;
+                          if (!val) return null;
+                          const minutes = parseDurationShorthand(String(val));
+                          if (minutes === null) return null;
+                          const readableStr = minutes >= 10080 
+                            ? `${(minutes / 10080).toFixed(1)}w` 
+                            : minutes >= 1440 
+                              ? `${(minutes / 1440).toFixed(1)}d` 
+                              : minutes >= 60 
+                                ? `${(minutes / 60).toFixed(1)}h` 
+                                : `${minutes}m`;
+                          return (
+                            <p className="text-[9px] text-indigo-650 mt-1 font-mono font-semibold">
+                              👉 Resolves to: {minutes} mins ({readableStr})
+                            </p>
+                          );
+                        })()}
                       </div>
                     </div>
                     <div>
