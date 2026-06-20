@@ -116,3 +116,10 @@ Features a detailed 2x2 modular matrix containing:
 2.  **Passphrase Credentials Ajuster**: Form fields styled in monospace password masking allowing analysts to securely update seat passwords.
 3.  **Notification Preferences Checklist**: Functional routing controls (Email alerts, watchdog alarms, weekly strategic digest) with clean standard checkboxes.
 4.  **Display Layout & Visual Theme Selectors**: Cards mapping physical preview thumbnails of the 4 design systems alongside direct triggers for page spacing scales.
+
+### 4.6 Engagement Analytics ("Analytical Metrics") View
+An operational chart layout that embeds inside active project dashboards:
+*   **Theme Integrations**: Area gradients resolve dynamically based on the active corporate theme. Gradients default to charcoal slate (`fill="url(#colorTotal)"` under stroke `#64748b`) coupled with brand workspace Indigo (`fill="url(#colorCompleted)"` under stroke `#6366f1`).
+*   **Typography Specs**: Cartesian axis values, tooltip legends, and label descriptions render inside explicit, highly legible monospace parameters (`text-[10px]` or `font-semibold text-xs text-slate-705`) matching Swiss corporate reporting designs.
+*   **Hover States**: Hovering tooltips utilize precise border colors (`border-slate-200`) and paper-white backgrounds with soft drop-shadow attributes, guaranteeing excellent legibility.
+

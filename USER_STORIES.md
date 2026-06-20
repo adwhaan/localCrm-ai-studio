@@ -92,3 +92,34 @@ Two primary physical seats access the workspace, determined by their `role` attr
 *   **Audit Table**: Accessible only to senior credentials via a dedicated sidebar node. Renders rows showing User, Target Category, Action Type, Detailed Diff Text, and raw ISO timestamps.
 *   **Bulk Operations Logging**: Batch deletions or cascading status changes must generate explicit multi-target audit entries.
 *   **RFC-4180 CSV Export**: Senior analysts can trigger an instant download of filtered logs to a CSV format. All cell blocks containing embedded commas or secondary quotes are strictly encapsulated within standard double-quotes to ensure perfect spreadsheet layout rendering.
+
+---
+
+### Story 7: Analytical Metrics & Engagement Burn-up Chart
+> *As a Senior Analyst, I want to track project progression via an 'Analytical Metrics' view on the Engagements tab showing a burn-up chart of completed vs. total touchpoints, so that I can visualize our progress over the engagement lifecycle.*
+
+#### Acceptance Criteria & UI Specifications:
+*   **Engagement Specific Metrics**: On the Engagements tab, the analyst can switch from "Operational Analytics" to the "Analytical Metrics" view.
+*   **Selectable Context Dropdown**: Renders a clean dropdown select menu to dynamically toggle metrics across all defined active client engagements.
+*   **Recharts Dual Area Burn-up Display**: Renders a dual-area scale chart counting Total Scope (total touchpoints scheduled cumulative over dates) plotted as a baseline, overlaid with Completed Milestones (actually completed touchpoints cumulative over dates) as an elegant colored Indigo curve, ensuring clean alignment of progress.
+
+---
+
+### Story 8: Duration Shorthand & Live Resolution
+> *As an Analyst, I want to log event durations using shorthand notation (e.g. 45m, 2h, 2d, 3w) with live feedback showing resolved minutes, so that I can log coordinates quickly.*
+
+#### Acceptance Criteria & UI Specifications:
+*   **Shorthand Parser Input**: The standard "Duration" number field is upgraded to a text field that supports alphanumeric shorthand tags: `m`, `h`, `d`, `w` (for minutes, hours, days, and weeks).
+*   **Live Translation Display**: Dynamic helper card computes and translates input shorthands into exact integer count coordinates on-the-fly (e.g., typing `3w` displays that it resolves to `30240 minutes`).
+*   **SQLite Integer Compliance**: On form submit, the resolved shorthand value is committed as a standard integer minutes column inside SQLite.
+
+---
+
+### Story 9: Dependency Risk Banner and Date Alignment
+> *As an Analyst, I want to be alerted on at-risk or blocked dependent milestones on the main dashboard, and easily apply predecessor dates when scheduling, so that I can align milestones.*
+
+#### Acceptance Criteria & UI Specifications:
+*   **Main Dashboard Watchdog Group**: Renders an error-stripe warning banner `⚠️ DEP RISK` listing all dependent milestones scheduled close to or past due without completion, or blocked by lagging predecessor tasks.
+*   **Click-to-Review Milestone Cards**: Affected milestones show up as mini interactive clickable cards that instantly pop up the slideout drawer for convenient detail adjustments.
+*   **Form Date Align Suggestion**: When creating or editing Touchpoints containing predecessors, shows a dynamic suggestion notice indicating predecessor target dates alongside an instant-click `"Apply suggestion"` trigger.
+

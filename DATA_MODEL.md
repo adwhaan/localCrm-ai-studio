@@ -88,6 +88,8 @@ CREATE TABLE IF NOT EXISTS interactions (
   contactRoles TEXT, -- JSON-stringified map recording contact-level event roles
   Note TEXT, -- Accompanying rich memo
   PrevInteraction INTEGER, -- Auto-increment link/indicator to prior Touchpoint (if any)
+  duration INTEGER, -- Parsed interaction length in minutes (e.g. shorthand parsed from 2h to 120)
+  engagementId TEXT, -- Link mapping touchpoint to specific active client engagements
   followUpDate TEXT, -- Watchdog date threshold: YYYY-MM-DD
   followUpNotes TEXT, 
   followUpCompleted INTEGER DEFAULT 0
@@ -211,6 +213,7 @@ Migrations executed on boot include:
 3.  Adding `groupName` to `tags` table.
 4.  Injecting `FirstName`, `MiddleName`, `LinkedInURL`, `Rating`, `AddressLine_1` to support extensive profiling detail.
 5.  Support for `followUpDate`, `followUpNotes`, and `followUpCompleted` fields within the `interactions` Touches table.
+6.  Support for `duration` (integer minute count) and `engagementId` (linking text mapping back to persistent project initiatives) inside the `interactions` table.
 
 ---
 

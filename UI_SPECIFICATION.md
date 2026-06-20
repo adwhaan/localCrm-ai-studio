@@ -140,6 +140,16 @@ An advanced scheduling matrix that renders task sequences, timelines, and inter-
         *   `y2` = (Successor Row Index * Row Height) + Row Height / 2
     *   **Interactive Highlight Feedback**: Hovering or tracking any row highlights its respective SVG connecting curves in bright indigo (`stroke-[#6366f1]` with width of `2.5px`) and accents the text. Otherwise, static connections are styled as thin slate lines (`stroke-[#cbd5e1]` with width of `1.5px`) with clean arrow marker pointers.
 
+### 4.4. Engagements Dashboard "Analytical Metrics" View
+An advanced visualizer representing the project lifecycle trajectory via a Recharts-powered dual area burn-up graph:
+*   **Selector Area**: Filter bar with a drop-down allowing selection of any defined Engagement initiative to plot.
+*   **Burn-up Curve Chart**:
+    *   **Y-Axis**: Cumulative touchpoint counts representing scoped work capacity.
+    *   **X-Axis**: Categorized chronological timeline checkpoints derived from scheduled touchpoints and milestones.
+    *   **Total Scope Curve**: Drawn as a charcoal/slate gray step-response area (`#64748b`, fill `url(#colorTotal)`) visualizing the cumulative total interactions of the project over time.
+    *   **Completed Milestones Curve**: Drawn as a bright, smooth Indigo curve (`#6366f1`, fill `url(#colorCompleted)`) showcasing progressive compliance and actual touchpoints set to `COMPLETED`.
+    *   **Empty State Layout**: Displays a dashed gray empty state panel if the selected initiative does not carry any planned schedules yet.
+
 ---
 
 ## 5. UI Elements & Core Component Styling
@@ -172,7 +182,15 @@ An advanced scheduling matrix that renders task sequences, timelines, and inter-
     </div>
     ```
 
-### 3. Floating Batch Action Bar
+### 3. Dependency Risk Alert Watchdog (Dependency Risk Banner)
+*   **Stripe Styling**: High-priority alert styled in soft rose color (`bg-rose-50 border-rose-200 text-slate-700`).
+*   **Visual Elements**: Animated pulsing alert triangle (`AlertTriangle className="animate-pulse text-rose-600"`) accompanied by direct interactive cards outlining all predecessor/successor blockages. Clicking on any block triggers the corresponding slideout detail drawer.
+
+### 4. Interactive Form Helpers & Resolution Badges
+*   **Shorthand Duration Resolver**: On any Touchpoint Creation/Edit panel, the "Duration" field serves a smart natural-language input (e.g., `45m`, `2h`, `2d`, `3w`). Highlighting below the input is a dynamic calculation badge indicating processed integer minutes (e.g. `120 mins`) and simplified duration formats.
+*   **Date Alignment Suggester**: If a successor Touchpoint carries an active predecessor, the scheduling date module displays an inline block containing the predecessor's target schedule date (e.g., `💡 Predecessor target Date: 2026-06-25`). Includes a direct clickable `"Apply suggestion"` anchor to instantaneously auto-align scheduled parameters.
+
+### 5. Floating Batch Action Bar
 *   **Aesthetic**: Dark Glassmorphic bottom pane.
     ```tsx
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-950/95 backdrop-blur-md border border-slate-800 ... rounded-2xl shadow-2xl p-4 pr-5 flex items-center justify-between gap-6 z-50">
