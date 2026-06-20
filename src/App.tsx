@@ -9,6 +9,7 @@ import { EntitiesMap } from "./components/EntitiesMap";
 import { InteractionsDashboard } from "./components/InteractionsDashboard";
 import { InterdependencyGantt } from "./components/InterdependencyGantt";
 import { EngagementsDashboard } from "./components/EngagementsDashboard";
+import { EngagementAnalyticsView } from "./components/EngagementAnalyticsView";
 import {
   LayoutDashboard,
   Users,
@@ -280,7 +281,7 @@ export default function App() {
   const [contactsViewMode, setContactsViewMode] = useState<"list" | "dashboard">("list");
   const [entitiesViewMode, setEntitiesViewMode] = useState<"list" | "dashboard" | "map">("list");
   const [interactionsSubView, setInteractionsSubView] = useState<"list" | "gantt" | "dashboard">("list");
-  const [engagementsViewMode, setEngagementsViewMode] = useState<"list" | "dashboard">("list");
+  const [engagementsViewMode, setEngagementsViewMode] = useState<"list" | "dashboard" | "metrics">("list");
 
   const [selectedItem, setSelectedItem] = useState<{
     dataType: "interaction" | "contact" | "entity" | "engagement" | "user";
@@ -5666,6 +5667,16 @@ export default function App() {
                     >
                       📊 Operational Analytics
                     </button>
+                    <button
+                      onClick={() => setEngagementsViewMode("metrics")}
+                      className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                        engagementsViewMode === "metrics"
+                          ? "bg-white text-slate-900 shadow-xs border border-slate-200/50"
+                          : "text-slate-550 hover:text-slate-950"
+                      }`}
+                    >
+                      📈 Analytical Metrics
+                    </button>
                   </div>
 
                   <button
@@ -6310,7 +6321,7 @@ export default function App() {
                 })}
               </div>
             </div>
-          ) : (
+          ) : engagementsViewMode === "dashboard" ? (
               <EngagementsDashboard
                 engagements={engagements}
                 onAddEngagement={() => { setNewType("engagement"); setIsNewModalOpen(true); }}
@@ -6318,7 +6329,13 @@ export default function App() {
                 onSwitchToListView={() => setEngagementsViewMode("list")}
                 showToast={showToast}
               />
-            )}
+            ) : engagementsViewMode === "metrics" ? (
+              <EngagementAnalyticsView 
+                engagements={engagements}
+                interactions={interactions}
+                onSwitchToListView={() => setEngagementsViewMode("list")}
+              />
+            ) : null}
                 </>
               )}
           </div>
